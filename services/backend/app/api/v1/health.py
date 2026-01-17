@@ -1,0 +1,9 @@
+from fastapi import APIRouter
+
+
+router = APIRouter()
+
+
+@router.get("/", summary="Health check")
+async def health_check() -> dict:
+    return {"status": "ok"}
