@@ -1,0 +1,10 @@
+# GLM-4V Scene Issue Worker Dependencies
+
+# HTTP requests
+requests>=2.31.0
+
+# OpenAI SDK (用于调用 GLM API)
+openai>=1.0.0
+
+# Image processing
+Pillow>=10.0.0

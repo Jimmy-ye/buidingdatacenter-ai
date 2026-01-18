@@ -1,0 +1,245 @@
+import os
+import time
+import base64
+import json
+from pathlib import Path
+from typing import Any, Dict, List
+
+import requests
+from openai import OpenAI
+from PIL import Image
+import io
+
+# ================= 配置区域 =================
+# 后端服务地址（FastAPI）
+BACKEND_BASE_URL = os.getenv("BDC_BACKEND_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+
+# 与后端 settings.local_storage_dir 保持一致，用于读取本地图片文件
+LOCAL_STORAGE_DIR = os.getenv("BDC_LOCAL_STORAGE_DIR", "./data/local_storage")
+
+# 可选：仅处理某个项目的 scene_issue 资产
+PROJECT_ID_FILTER = os.getenv("BDC_SCENE_PROJECT_ID")  # 留空则处理所有项目
+
+# GLM API 配置（兼容 OpenAI SDK）
+GLM_API_KEY = os.getenv("GLM_API_KEY", "")
+GLM_BASE_URL = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
+VISION_MODEL = os.getenv("GLM_VISION_MODEL", "glm-4v")
+
+# Worker 轮询间隔 (秒)
+POLL_INTERVAL = int(os.getenv("BDC_SCENE_WORKER_POLL_INTERVAL", "60"))
+
+if not GLM_API_KEY:
+    raise RuntimeError("GLM_API_KEY is not set in environment variables")
+
+client = OpenAI(api_key=GLM_API_KEY, base_url=GLM_BASE_URL)
+
+
+# ================= 辅助函数 =================
+
+def get_pending_scene_assets() -> List[Dict[str, Any]]:
+    """从后端获取待 LLM 处理的 scene_issue 图片资产列表。"""
+
+    params: Dict[str, Any] = {
+        "modality": "image",
+        "content_role": "scene_issue",
+    }
+    if PROJECT_ID_FILTER:
+        params["project_id"] = PROJECT_ID_FILTER
+
+    resp = requests.get(f"{BACKEND_BASE_URL}/api/v1/assets", params=params, timeout=30)
+    if resp.status_code != 200:
+        print(f"[WARN] Failed to fetch assets: HTTP {resp.status_code} {resp.text}")
+        return []
+
+    assets = resp.json()
+    if not isinstance(assets, list):
+        print("[WARN] Unexpected assets response shape (expected list)")
+        return []
+
+    pending = [a for a in assets if a.get("status") == "pending_scene_llm"]
+    return pending
+
+
+def get_asset_detail(asset_id: str) -> Dict[str, Any]:
+    resp = requests.get(f"{BACKEND_BASE_URL}/api/v1/assets/{asset_id}", timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_image_content_from_detail(detail: Dict[str, Any]):
+    """根据 AssetDetail 返回的 file_path 构造本地图片内容。"""
+
+    file_path = detail.get("file_path")
+    if not file_path:
+        print(f"[WARN] asset {detail.get('id')} has no file_path; cannot load image")
+        return None
+
+    full_path = Path(LOCAL_STORAGE_DIR) / file_path
+    if not full_path.is_file():
+        print(f"[WARN] Local image file not found: {full_path}")
+        return None
+
+    try:
+        with Image.open(full_path) as img:
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            base64_url = f"data:image/jpeg;base64,{img_str}"
+            return {"type": "image_url", "image_url": {"url": base64_url}}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] Error processing image {full_path}: {exc}")
+        return None
+
+
+def build_scene_prompt(note: str | None) -> str:
+    """构造发送给 GLM-4V 的中文 Prompt，要求输出 SceneIssueReportPayload JSON。"""
+
+    base = """
+你是一名建筑节能与运行诊断工程师助手。
+请结合现场照片（image）和工程师备注（若有）分析现场问题或运行状态。
+
+严格按照下列 JSON 结构输出，不要包含任何多余文字或 markdown：
+{
+  "title": "一句话的简短标题，可为空",
+  "issue_category": "问题类别，例如：冷源效率、控制策略、设备维护、安全隐患、舒适性等，可为空",
+  "severity": "low | medium | high 之一",
+  "summary": "对现场主要问题或状态的简要描述，必须是非空字符串",
+  "suspected_causes": ["可能原因1", "可能原因2"],
+  "recommended_actions": ["建议措施1", "建议措施2"],
+  "confidence": 0.0 到 1.0 之间的数字，可为空,
+  "tags": ["若干短标签，用于过滤检索"]
+}
+
+要求：
+- 严格输出 JSON 对象（最外层是 { ... }），不要输出 explain、注释或 markdown。
+- 如果图片没有明显问题，也要在 summary 中说明是“未发现明显异常”，severity 可设为 "low"。
+""".strip()
+
+    if note:
+        base += "\n\n工程师备注如下，请一并参考：\n" + note
+    return base
+
+
+def call_glm_vision(image_content: Dict[str, Any], text_prompt: str) -> Dict[str, Any] | None:
+    """调用 GLM-4V，期望返回符合 SceneIssueReportPayload 的 JSON 对象。"""
+
+    try:
+        response = client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        image_content,
+                        {"type": "text", "text": text_prompt},
+                    ],
+                }
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content
+        if isinstance(content, str):
+            return json.loads(content)
+        if isinstance(content, dict):
+            return content
+        print(f"[WARN] Unexpected GLM content type: {type(content)}")
+        return None
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] GLM API Error: {exc}")
+        return None
+
+
+def normalise_scene_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """将 GLM 返回结果规范化为 SceneIssueReportPayload 结构。"""
+
+    summary = raw.get("summary") or raw.get("description") or ""
+    if not isinstance(summary, str):
+        summary = str(summary)
+
+    payload: Dict[str, Any] = {
+        "title": raw.get("title"),
+        "issue_category": raw.get("issue_category") or raw.get("issue_type"),
+        "severity": raw.get("severity"),
+        "summary": summary.strip() or "未能从图片中提取明确的问题，请人工复核。",
+        "suspected_causes": raw.get("suspected_causes") or raw.get("causes") or [],
+        "recommended_actions": raw.get("recommended_actions") or raw.get("actions") or [],
+        "confidence": raw.get("confidence"),
+        "tags": raw.get("tags") or [],
+    }
+
+    # 确保列表字段为 list[str]
+    for key in ("suspected_causes", "recommended_actions", "tags"):
+        val = payload.get(key)
+        if isinstance(val, str):
+            payload[key] = [val]
+        elif not isinstance(val, list):
+            payload[key] = []
+
+    return payload
+
+
+def post_scene_issue_report(asset_id: str, payload: Dict[str, Any]) -> bool:
+    url = f"{BACKEND_BASE_URL}/api/v1/assets/{asset_id}/scene_issue_report"
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        if resp.status_code in (200, 201):
+            print(f"[OK] Reported scene_issue_report_v1 for asset {asset_id}")
+            return True
+        print(f"[WARN] Failed to post report for {asset_id}: HTTP {resp.status_code} {resp.text}")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] Exception while posting report for {asset_id}: {exc}")
+        return False
+
+
+# ================= 主循环 =================
+
+def process_once() -> None:
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking for pending scene_issue assets...")
+    assets = get_pending_scene_assets()
+    if not assets:
+        print("No pending assets found.")
+        return
+
+    for asset in assets:
+        asset_id = asset.get("id")
+        if not asset_id:
+            continue
+
+        print(f"Processing asset {asset_id} ...")
+        try:
+            detail = get_asset_detail(asset_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] Failed to fetch asset detail {asset_id}: {exc}")
+            continue
+
+        image_content = get_image_content_from_detail(detail)
+        if not image_content:
+            continue
+
+        note = detail.get("description") or ""
+        prompt = build_scene_prompt(note)
+
+        raw_result = call_glm_vision(image_content, prompt)
+        if not raw_result:
+            print(f"[WARN] GLM returned empty/invalid result for asset {asset_id}")
+            continue
+
+        payload = normalise_scene_payload(raw_result)
+        post_scene_issue_report(asset_id, payload)
+
+
+def main() -> None:
+    print("Starting GLM-4V scene_issue worker...")
+    print(f"Backend: {BACKEND_BASE_URL}")
+    print(f"Local storage dir: {LOCAL_STORAGE_DIR}")
+    while True:
+        process_once()
+        time.sleep(POLL_INTERVAL)
+
+
+if __name__ == "__main__":
+    main()
