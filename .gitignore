@@ -20,20 +20,10 @@ wheels/
 .installed.cfg
 *.egg
 
-# 测试
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-*.cover
-.hypothesis/
-
-# 虚拟环境
+# Virtual Environment
 venv/
-env/
 ENV/
+env/
 .venv
 
 # IDE
@@ -43,28 +33,31 @@ ENV/
 *.swo
 *~
 
-# 环境变量
-.env
-.env.local
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
-# 数据库
+# Local data (SQLite database, uploaded files, etc.)
+data/
 *.db
 *.sqlite
 *.sqlite3
 
-# 日志
+# Environment variables
+.env
+.env.local
+
+# Claude Code
+.claude/
+
+# Logs
 *.log
 
-# macOS
+# OS
 .DS_Store
-
-# Windows
 Thumbs.db
-desktop.ini
 
-# 临时文件
-*.tmp
-*.temp
-
-# 编辑器规则
+# Windsurf IDE
 .windsurfrules
