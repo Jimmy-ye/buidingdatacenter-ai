@@ -3,13 +3,13 @@ import os
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Query, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Path, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from shared.config.settings import get_settings
 from shared.db.models_asset import Asset, AssetStructuredPayload, FileBlob
 from shared.db.session import get_db
-from ...schemas.asset import AssetCreate, AssetRead, AssetDetailRead
+from ...schemas.asset import AssetCreate, AssetRead, AssetDetailRead, SceneIssueReportPayload
 from ...services.image_pipeline import process_image_with_ocr, route_image_asset
 
 
@@ -48,6 +48,49 @@ async def get_asset(
     asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    return asset
+
+
+@router.post(
+    "/{asset_id}/scene_issue_report",
+    response_model=AssetDetailRead,
+    summary="Attach an LLM-based scene issue report to a scene_issue image asset",
+)
+async def create_scene_issue_report(
+    asset_id: uuid.UUID = Path(..., description="Asset ID"),
+    report: SceneIssueReportPayload = Body(..., description="LLM-generated scene issue report payload"),
+    db: Session = Depends(get_db),
+) -> AssetDetailRead:
+    asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    # Enforce that this endpoint is only used for scene_issue images
+    role = (asset.content_role or "").lower()
+    if asset.modality != "image" or role != "scene_issue":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scene_issue_report is only valid for image assets with content_role='scene_issue'",
+        )
+
+    existing_count = (
+        db.query(AssetStructuredPayload)
+        .filter(AssetStructuredPayload.asset_id == asset.id)
+        .count()
+    )
+
+    structured = AssetStructuredPayload(
+        asset_id=asset.id,
+        schema_type="scene_issue_report_v1",
+        payload=report.model_dump(),
+        version=float(existing_count + 1),
+        created_by="llm",
+    )
+    db.add(structured)
+
+    asset.status = "parsed_scene_llm"
+    db.commit()
+    db.refresh(asset)
     return asset
 
 

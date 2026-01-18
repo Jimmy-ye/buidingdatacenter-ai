@@ -58,3 +58,20 @@ class AssetStructuredPayloadRead(BaseModel):
 
 class AssetDetailRead(AssetRead):
     structured_payloads: List[AssetStructuredPayloadRead] = []
+
+
+class SceneIssueReportPayload(BaseModel):
+    """Structured payload for LLM-based scene issue understanding.
+
+    This is intended to be stored under schema_type="scene_issue_report_v1"
+    in AssetStructuredPayload.payload.
+    """
+
+    title: Optional[str] = None
+    issue_category: Optional[str] = None  # e.g. "冷源效率", "控制策略", "设备维护"
+    severity: Optional[str] = None  # e.g. low/medium/high
+    summary: str  # concise description of the observed issue or status
+    suspected_causes: List[str] = []
+    recommended_actions: List[str] = []
+    confidence: Optional[float] = None
+    tags: List[str] = []

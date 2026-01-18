@@ -1,3 +1,4 @@
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -31,4 +32,4 @@ class ProjectUpdate(BaseModel):
 class ProjectRead(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: uuid.UUID
