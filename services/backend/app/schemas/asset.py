@@ -1,7 +1,8 @@
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class FileBlobCreate(BaseModel):
@@ -15,14 +16,15 @@ class FileBlobCreate(BaseModel):
 
 
 class AssetBase(BaseModel):
-    project_id: str
-    building_id: Optional[str] = None
-    zone_id: Optional[str] = None
-    system_id: Optional[str] = None
-    device_id: Optional[str] = None
+    project_id: uuid.UUID
+    building_id: Optional[uuid.UUID] = None
+    zone_id: Optional[uuid.UUID] = None
+    system_id: Optional[uuid.UUID] = None
+    device_id: Optional[uuid.UUID] = None
 
     modality: str
     source: str
+    content_role: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
 
@@ -38,8 +40,21 @@ class AssetCreate(AssetBase):
 
 
 class AssetRead(AssetBase):
-    id: str
-    file_id: str
+    model_config = ConfigDict(from_attributes=True)
 
-    class Config:
-        from_attributes = True
+    id: uuid.UUID
+    file_id: uuid.UUID
+
+
+class AssetStructuredPayloadRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    schema_type: str
+    payload: Dict[str, Any]
+    version: float
+    created_by: Optional[str] = None
+    created_at: datetime
+
+
+class AssetDetailRead(AssetRead):
+    structured_payloads: List[AssetStructuredPayloadRead] = []
