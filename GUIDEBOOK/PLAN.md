@@ -1,0 +1,804 @@
+# 建筑节能多模态数据中心与 Agent 平台规划
+
+## 1. 项目整体目标
+
+- **核心理念**：构建一个面向建筑节能诊断与能源管理的多模态“数据中心 + Agent + 专家库”平台。
+- **主要能力**：
+  - 汇总管理项目相关的图片、表格、文本、音频、时序能耗数据等多模态资料。
+  - 通过大模型（Claude 等）+ 工具链构建“类 Agent”，自动调用和处理这些资料。
+  - 结合基于专家知识与历史案例的“决策中心”，输出节能诊断和策略建议。
+  - 支持多端接入：
+    - PC 端：分析、决策、报告输出（Python 为主）。
+    - 手机端：现场采集图片 + 语音/文字说明，并上传到对应项目库.
+    - 服务器：统一数据中心与 AI/规则引擎编排.
+
+---
+
+## 2. 整体系统架构
+
+### 2.1 分层视角
+
+- **客户端层**
+  - PC Web UI（浏览器访问）：项目管理、数据浏览、任务创建、报告查看.
+  - 手机 App / 小程序：现场采集图片、语音/文字说明，上传到项目库.
+
+- **服务层（Python 为主）**
+  - API 网关 / 认证服务（如 FastAPI 实现）：统一鉴权、路由入口.
+  - 多模态数据中心服务：项目、建筑、设备、资产（Asset）、时序数据管理.
+  - AI-Orchestrator（AI 编排服务）：封装 Claude 调用与工具链，管理 Agent 流程.
+  - 专家库决策中心：规则引擎 + 案例库，形成结构化节能策略.
+  - 检索与向量服务：统一多模态向量检索接口.
+
+- **数据层**
+  - 关系数据库（PostgreSQL / MySQL）：项目结构、设备、资产元数据、任务与结果等.
+  - 对象存储（MinIO / 云存储）：原始文件（图片、PDF、Excel、音频等）.
+  - 向量库（pgvector / Milvus 等）：文本、图片、表格等嵌入向量，用于语义检索.
+  - 时序数据存储（可用时序库或 DB 分表）：能耗、电量、温度等传感器数据.
+
+### 2.2 实际部署拓扑图（MVP 阶段）
+
+```mermaid
+flowchart LR
+  subgraph Client[Client]
+    PC[PC Web UI\n(浏览器 / Streamlit)]
+    Mobile[移动端 App / 小程序]
+  end
+
+  subgraph Backend[Backend Services (FastAPI)]
+    API[API 网关 / AuthService]
+    ProjectSvc[ProjectService]
+    AssetSvc[AssetService]
+    TSvc[TimeSeriesService]
+    AISvc[AI-OrchestratorService]
+    RuleSvc[ExpertRuleService]
+    SearchSvc[SearchService]
+  end
+
+  subgraph Infra[Infra & Data Layer]
+    DB[(PostgreSQL\n+ TimescaleDB\n+ pgvector)]
+    MinIO[(MinIO 对象存储)]
+    Qdrant[(Qdrant 向量库，可选)]
+  end
+
+  PC --> API
+  Mobile --> API
+
+  API --> ProjectSvc
+  API --> AssetSvc
+  API --> TSvc
+  API --> AISvc
+  API --> RuleSvc
+  API --> SearchSvc
+
+  AssetSvc --> MinIO
+  AssetSvc --> DB
+  TSvc --> DB
+
+  SearchSvc --> DB
+  SearchSvc --> Qdrant
+
+  AISvc --> SearchSvc
+  AISvc --> RuleSvc
+  AISvc --> DB
+```
+
+---
+
+## 3. 数据中心与核心表结构草图
+
+### 3.1 工程与空间模型
+
+- **Project（项目）**
+  - 字段：`id`, `name`, `client`, `location`（城市/气候区）, `type`（公共建筑/住宅/工业等）, `status`, `start_date`, `end_date`.
+  - 关系：1–N `Building`, 1–N `AnalysisTask`.
+
+- **Building（建筑）**
+  - 字段：`id`, `project_id`, `name`, `usage_type`（办公、商场…）, `floor_area`, `year_built`, `energy_grade`.
+  - 关系：1–N `Zone`, 1–N `System`.
+
+- **Zone（区域/楼层/房间）**
+  - 字段：`id`, `building_id`, `name`, `type`（楼层/房间/功能区）, `geometry_ref`（可选：BIM/平面图坐标引用）。
+  - 关系：1–N `Device`, 1–N `Asset`.
+
+### 3.2 系统与设备模型
+
+- **System（系统）**
+  - 字段：`id`, `building_id`, `type`（HVAC/照明/给排水/电梯…）, `name`, `description`.
+  - 关系：1–N `Device`, 1–N `SensorPoint`.
+
+- **Device（设备）**
+  - 字段：`id`, `system_id`, `zone_id`（可选）, `device_type`（冷机、风机盘管、灯具…）, `model`, `rated_power`, `serial_no`.
+  - 关系：1–N `SensorPoint`, 1–N `Asset`.
+
+### 3.3 多模态资料模型（以 Asset 为核心）
+
+- **Asset（多模态资产，统一抽象）**
+  - 关联维度：`project_id`, `building_id`, `zone_id`, `system_id`, `device_id`（部分可空）。
+  - 基本字段：
+    - `id`
+    - `modality`：`image` / `table` / `text` / `audio` / `document` / `timeseries_snapshot`
+    - `source`：`mobile_app` / `pc_upload` / `external_system` / `ai_generated` / `ocr` / `asr`
+    - `title`, `description`
+    - `file_id`（关联原始文件存储 `FileBlob`）
+    - `structured_payload_id`（关联结构化解析结果，可选）
+    - `capture_time`（采集/形成时间）
+    - `location_meta`（GPS / 楼层 / 房间号等 JSON）
+    - `tags`（JSON 数组，如 `["围护结构","渗漏","隐患"]`）
+    - `quality_score`, `status`（`raw` / `parsed` / `validated`）
+
+- **FileBlob（文件物理存储信息）**
+  - 字段：`id`, `storage_type`（`minio` / `oss` / `local`）, `bucket`, `path`, `file_name`, `content_type`, `size`, `hash`.
+  - 功能：描述原始文件在对象存储中的位置和属性，实现去重和完整性校验.
+
+- **AssetStructuredPayload（结构化解析结果）**
+  - 字段：`id`, `asset_id`, `schema_type`（`image_annotation` / `table_data` / `text_note` / `audio_transcript` / `document_outline`）, `payload`（JSON）, `version`, `created_by`（`human`/`ai`）, `created_at`.
+  - 功能：存放统一 schema 下的结构化内容（见第 4 节）。
+
+- **AssetFeature（向量与特征）**
+  - 字段：`id`, `asset_id`, `feature_type`（`text_embedding` / `image_embedding` / `table_key_embedding` 等）, `vector`（向量库存储引用或直接存储）, `metadata`（JSON：段落号、表格行号等）。
+  - 功能：支持多模态语义检索和相似案例查找.
+
+### 3.4 时序与点位
+
+- **SensorPoint（监测点/表计）**
+  - 字段：`id`, `project_id`, `building_id`, `system_id`, `device_id`, `code`, `name`, `point_type`（电表、热量表、温度、流量…）, `unit`, `location_meta`.
+  - 关系：1–N `SensorData`.
+
+- **SensorData（时序数据）**
+  - 字段：`id`（可选暴露）, `sensor_point_id`, `ts`（时间戳）, `value`, `quality_flag`.
+  - 存储：可使用时序数据库或分表策略，保证高写入和查询性能.
+
+### 3.5 任务、结果与专家库
+
+- **AnalysisTask（分析任务）**
+  - 字段：`id`, `project_id`, `building_id`, `target_scope`（系统/设备/全建筑）, `task_type`（能耗基准/节能诊断/改造评估…）, `status`（`pending`/`running`/`done`/`failed`）, `input_refs`（JSON：使用到的 Asset/时序/规则 ID 列表）, `created_by`, `created_at`.
+
+- **AnalysisResult（分析结果）**
+  - 字段：`id`, `task_id`, `summary_text`（人可读摘要）, `structured_json`（问题列表、措施、优先级、估算节能量等结构化输出）, `score`（节能潜力评分等）。
+
+- **ExpertRule（专家规则）**
+  - 字段：`id`, `scope`（`building` / `system` / `device` / `usage_pattern`）, `name`, `description`, `condition_expr`（DSL/JSON，由规则引擎解释）, `recommendation_template`（可带变量占位）, `enabled`, `version`.
+
+- **CaseLibrary（案例库）**
+  - 字段：`id`, `project_ref`（可选：来源项目）, `problem_profile`, `measures`, `effect`（结构化 JSON）, `text_summary`（文本摘要）, `vector`（案例向量）。
+
+---
+
+## 4. 服务划分与职责
+
+### 4.1 服务列表
+
+- **Auth / UserService**
+  - 管理用户、角色、项目权限；提供统一鉴权接口.
+
+- **ProjectService**
+  - 管理 `Project/Building/Zone/System/Device` 的增删改查.
+  - 提供“项目结构树”API（供前端和 AI 使用）。
+
+- **AssetService（多模态资料服务）**
+  - 管理 `Asset`、`FileBlob`、`AssetStructuredPayload`、`AssetFeature`.
+  - 提供：上传、多条件查询、删除/版本管理、聚合视图.
+
+- **TimeSeriesService**
+  - 管理 `SensorPoint`、`SensorData`.
+  - 提供：统计/对标/区间查询等接口.
+
+- **AI-OrchestratorService（AI 编排服务）**
+  - 封装 Claude（及其他模型）调用，统一接入大模型.
+  - 负责 Agent 工作流：数据准备 → 模型推理 → 规则校验 → 结果汇总.
+
+- **ExpertRuleService（专家规则服务）**
+  - 维护 `ExpertRule`、`CaseLibrary`.
+  - 对外：规则评估 API、案例检索 API.
+
+- **SearchService（检索服务）**
+  - 封装底层向量库/全文检索，实现统一搜索接口.
+
+---
+
+## 5. 统一数据格式设计（面向多模态和 Agent）
+
+### 5.1 统一 DataItem 视图（提供给 Agent 使用）
+
+为简化 Agent 逻辑，对上提供统一的 `DataItem` 视图，底层由 AssetService 聚合：
+
+```json
+{
+  "id": "asset-uuid",
+  "project_id": "...",
+  "building_id": "...",
+  "context": {
+    "zone": "5F 西侧办公室",
+    "system": "HVAC",
+    "device": "风机盘管 FCU-03",
+    "capture_time": "2025-11-01T10:23:00Z",
+    "source": "mobile_app",
+    "tags": ["围护结构", "冷桥", "现场检查"],
+    "location_meta": { "gps": "...", "room_no": "501" }
+  },
+  "modality": "image",
+  "payload_schema": "image_annotation",
+  "raw_url": "https://.../bucket/path.jpg",
+  "structured_payload": { },
+  "features": [
+    { "type": "image_embedding", "vector_id": "..." },
+    { "type": "text_embedding", "vector_id": "..." }
+  ]
+}
+```
+
+- Agent 只依赖 `DataItem`，不直接访问底层表结构.
+- `structured_payload` 字段依赖统一 schema（见下文各模态定义）。
+
+### 5.2 通用元数据字段规范
+
+所有模态在结构化层面（`AssetStructuredPayload.payload`）应具备的通用字段：
+
+- `id`：对应 `asset_id` 或逻辑标识.
+- `project_id`：所属项目.
+- `modality`：模态类型（`image`/`table`/`text`/`audio`/`document` 等）。
+- `context`：
+  - `building_id`, `zone_id`, `system_id`, `device_id`（可空）
+  - `capture_time`
+  - `source`（`mobile_app`/`pc_upload`/`external_system`/`ai_generated`/`ocr`/`asr`）
+  - `tags`（业务标签，如“围护结构”“空调系统”“设计图纸”等）
+- `raw_url`：原始数据访问路径（通过 FileBlob 映射）。
+- `schema_version`：结构化 schema 版本号.
+- `created_at`, `created_by`：生成时间与责任主体.
+
+### 5.3 各模态结构化 schema 约定
+
+#### 5.3.1 图片：`image_annotation`
+
+示例字段：
+
+```json
+{
+  "image_meta": {
+    "width": 1920,
+    "height": 1080,
+    "format": "jpeg",
+    "exif": { "make": "...", "model": "..." }
+  },
+  "annotations": {
+    "objects": [
+      {
+        "label": "裂缝",
+        "bbox": [100, 200, 400, 600],
+        "confidence": 0.92,
+        "comment": "外墙保温层开裂"
+      }
+    ],
+    "global_tags": ["围护结构", "缺陷", "维修建议"]
+  },
+  "derived_text": "仪表读数：1234 kWh"
+}
+```
+
+- `image_meta`：图片尺寸、格式与可选 EXIF 信息（可做隐私过滤）。
+- `annotations.objects`：检测到的目标（可由模型/人工标注产生）。
+- `global_tags`：整体标签，方便检索与过滤.
+- `derived_text`：OCR 提取的文字，如铭牌、仪表读数等.
+
+#### 5.3.2 表格：`table_data`
+
+```json
+{
+  "table_type": "energy_log",
+  "headers": ["时间", "电表读数(kWh)", "区域"],
+  "rows": [
+    {"时间": "2025-01-01 00:00", "电表读数(kWh)": 1234.5, "区域": "5F"},
+    {"时间": "2025-01-01 01:00", "电表读数(kWh)": 1250.7, "区域": "5F"}
+  ],
+  "key_columns": ["时间"],
+  "unit_info": {
+    "电表读数(kWh)": "kWh"
+  }
+}
+```
+
+- `table_type`：表格业务类型（能耗日志、资产盘点、巡检记录等）。
+- `headers`：列名.
+- `rows`：行数据统一为「列名–值」形式，便于 AI 与统计处理.
+- `key_columns`：主索引列（例如 `时间`、`设备编号` 等）。
+- `unit_info`：各列单位说明.
+
+#### 5.3.3 文本：`text_note`
+
+```json
+{
+  "content": "5F 西侧办公室夏季空调用电偏高，怀疑空调设定过低且长时间无人关闭。",
+  "language": "zh-CN",
+  "source": "manual",
+  "role": "field_note",
+  "segment_index": 0
+}
+```
+
+- `content`：文本内容.
+- `language`：语言代码.
+- `source`：来源（人工录入、ASR、OCR、模型生成等）。
+- `role`：文本的业务角色（现场记录、诊断结论、客户需求、报告段落）。
+- `segment_index`：如果来自长文拆分，则标记分段序号.
+
+#### 5.3.4 音频：`audio_transcript`
+
+```json
+{
+  "audio_url": "https://.../audio/xxx.wav",
+  "duration": 35.6,
+  "format": "wav",
+  "transcript": "这里是五楼西侧办公室，空调送风量明显不足，回风口有积灰。",
+  "confidence": 0.94,
+  "language": "zh-CN",
+  "segments": [
+    {"start": 0.0, "end": 5.0, "text": "这里是五楼西侧办公室"},
+    {"start": 5.0, "end": 12.0, "text": "空调送风量明显不足"}
+  ]
+}
+```
+
+- 保留原始音频路径与转写文本.
+- `segments` 支持基于时间戳的精细定位与对应画面.
+
+#### 5.3.5 文档：`document_outline`
+
+```json
+{
+  "doc_type": "audit_report",
+  "sections": [
+    {
+      "title": "建筑概况",
+      "level": 1,
+      "text": "本项目位于...",
+      "page_range": [1, 2]
+    },
+    {
+      "title": "能耗现状分析",
+      "level": 1,
+      "text": "近三年用电...",
+      "page_range": [3, 5]
+    }
+  ],
+  "extracted_tables": ["asset-id-table-1", "asset-id-table-2"]
+}
+```
+
+- `doc_type`：文档类型（设计文件、规范、审计报告等）。
+- `sections`：分章节结构，便于 Agent 只引用部分内容.
+- `extracted_tables`：与表格型 Asset 的关联.
+
+### 5.4 统一多模态处理 Pipeline 规则
+
+#### 5.4.1 原始数据接入规则
+
+- 无论来源（手机/PC/外部系统），所有数据首先落地为：
+  - `Asset` + `FileBlob`（原始文件）；
+  - 最少字段：`project_id`, `modality`, `capture_time`, `source`.
+
+#### 5.4.2 解析与标准化 Pipeline
+
+- 按模态触发对应处理器，生成 `AssetStructuredPayload`：
+  - 图片：压缩 → 去除敏感 EXIF → OCR → 智能分流（铭牌用规则、现场照片用 Claude Vision） → 写 `image_annotation`.
+  - 文本：清洗 → 分段 → 语言检测 → 写 `text_note`.
+  - 表格：解析表头 → 类型推断 → 大模型清洗（异常值/缺失值处理） → 标准化字段映射 → 写 `table_data`.
+  - 音频：ASR 转写 → 写 `audio_transcript`.
+  - 文档：分章节 + 表格抽取 → 写 `document_outline`.
+
+#### 5.4.3 向量化与检索规则
+
+- 对所有 `structured_payload` 中可检索文本或特征：
+  - 统一抽取成 `AssetFeature`（含 `feature_type` 与 `metadata`）。
+  - 底层由向量库实现相似度检索，上层通过 `SearchService` 暴露统一接口.
+
+#### 5.4.4 版本管理与溯源规则
+
+- 每次重新解析/清洗/纠错都会生成新版本 `AssetStructuredPayload`：
+  - `version` 字段递增；`asset_id` 不变.
+  - 保留历史版本，便于审计与对比.
+- Agent 默认使用最新版本，也可按需指定历史版本.
+
+#### 5.4.5 Agent 使用规则
+
+- Agent 不直接访问底层数据库/文件，只通过：
+  - `GET /data/items`（返回 `DataItem` 统一视图）、
+  - `SearchService`（语义检索）、
+  - `ExpertRuleService`（规则评估与案例检索）。
+- 这样可以保证：
+  - 业务层可演进（底层表结构可优化/拆分），
+  - Agent 提示词与工具调用接口保持稳定.
+
+---
+
+## 6. 实施路线概述
+
+### 阶段 1：核心功能（4–6 周）
+
+**目标**：完成两个核心模态的基础处理能力
+
+- 搭建基础后端：FastAPI + DB + 对象存储（MinIO）+ 简单向量库
+- 实现：
+  - `Project/Building/Zone/System/Device` 基础管理；
+  - **现场图片**：OCR + 智能分流（表具铭牌用规则、现场照片用 Claude Vision）；
+  - **数据表格**：大模型清洗 + 分析 Skills（能耗数据、设备运行数据）；
+  - **诊断功能**：基于专家规则清单的问题匹配；
+  - 手机端：登录 + 项目选择 + 图片 + 文字上传；
+  - PC 端：简单 Web/Streamlit 页面，浏览项目与资料；
+  - 用户反馈闭环机制。
+
+### 阶段 2：体验提升（4–6 周）
+
+**目标**：优化用户体验，提升系统性能
+
+- 异步处理 + 进度反馈（Celery/任务队列）；
+- 数据质量评分（完整度、可靠度）；
+- 移动端语音输入支持（语音转文字）；
+- 完善用户反馈学习机制（规则自动优化）；
+- 批量上传功能；
+- 性能优化（缓存、索引优化）。
+
+### 阶段 3：深度优化（持续）
+
+**目标**：扩展高级功能，形成完整产品
+
+- 完整 Agent 工作流：年度能耗体检 → 问题诊断 → 策略建议 → 报告草案；
+- 多轮诊断机制（补充资料建议）；
+- 历史数据对比分析（改造前后、同期对比）；
+- 完善 PC 端正式前端（React + Ant Design）；
+- 扩展专家规则库与案例库；
+- 手机端高级功能（离线缓存、定位/二维码设备识别）；
+- 成本优化策略（批量 API、规则优先、结果缓存）；
+- 优化性能与安全（权限控制、审计日志、数据脱敏）。
+
+## 7. 推荐开源技术栈与选型策略
+
+### 7.1 阶段 1：MVP 技术栈（优先保证开源、免费、易用、容错）
+
+- **后端框架**：FastAPI + SQLAlchemy
+- **数据库**：PostgreSQL + TimescaleDB（时序扩展）
+- **向量检索（MVP）**：pgvector（PostgreSQL 扩展，避免引入额外服务）
+- **对象存储**：MinIO（S3 兼容，用于 `FileBlob`）
+- **多模态解析**：Unstructured.io + PyMuPDF（PDF/Word/Excel）、配合 PaddleOCR（中文 OCR）
+- **RAG / 检索封装**：LlamaIndex（作为 `SearchService` 的索引与检索实现层）
+- **规则引擎**：基于 jsonlogic 的自建轻量规则引擎（Python 实现，用于 `ExpertRule.condition_expr`）
+- **Agent 形态**：不引入额外 Agent 框架，使用 FastAPI 路由 + Python 函数 + Claude 工具调用，编排 "数据准备 → 模型推理 → 规则校验 → 结果汇总" 流程.
+
+### 7.2 阶段 2：正式版与扩展技术栈
+
+- **向量库升级**：
+  - 将热点多模态向量迁移至 Qdrant，用于高性能检索与复杂过滤；
+  - 保留 pgvector 作为基础方案与数据备份.
+- **Agent 与工作流框架**：
+  - 引入 LangGraph 作为工作流/状态机层，实现 Agent 节点编排、错误重试与分支逻辑；
+  - 可视化调试年度体检、系统诊断等复杂流程.
+- **多模态解析增强**：
+  - 继续使用 Unstructured + PyMuPDF + PaddleOCR；
+  - 根据业务需要补充 Tesseract 等工具作为备选解析方案.
+- **专家库与规则**：
+  - 以 jsonlogic 引擎为核心，扩展规则表达能力与管理界面；
+  - 若业务规则极度复杂，再评估接入 Drools 等专业规则引擎（通过 REST 网关），保持与 Python 栈解耦.
+- **建筑能耗仿真**：
+  - 通过 CLI 集成 OpenStudio / EnergyPlus，将仿真结果写入 `SensorData`，供后续诊断与对标使用.
+
+### 7.3 选型原则总结
+
+- **开源与免费优先**：后端、数据库、向量库、对象存储、解析与规则引擎均基于开源方案搭建，避免锁定.
+- **单一技术栈优先**：数据库优先采用 PostgreSQL + 扩展（TimescaleDB / pgvector），降低维护成本与容错压力.
+ - **逐步引入复杂组件**：
+  - MVP 阶段只依赖 FastAPI + PostgreSQL + MinIO + LlamaIndex + jsonlogic；
+  - 第二阶段再引入 Qdrant、LangGraph、仿真工具等“重型组件”.
+ - **以数据中心为核心**：所有开源组件围绕 `Asset` / `SensorData` / `ExpertRule` 等核心模型服务，确保未来可替换和扩展。
+
+## 8. 后端 FastAPI 项目结构（方案一）
+
+### 8.1 顶层目录结构草案
+
+```text
+program-bdc-ai/
+├── services/                      # 后端各服务子项目
+│   ├── auth_service/              # Auth / UserService
+│   ├── project_service/           # ProjectService
+│   ├── asset_service/             # AssetService
+│   ├── timeseries_service/        # TimeSeriesService
+│   ├── ai_orchestrator_service/   # AI-OrchestratorService
+│   ├── expert_rule_service/       # ExpertRuleService
+│   └── search_service/            # SearchService
+├── shared/                        # 共享代码
+│   ├── db/                        # 数据库连接与基础模型
+│   ├── config/                    # 配置管理（环境变量、常量）
+│   └── utils/                     # 通用工具（日志、异常、安全等）
+├── infrastructure/                # 基础设施与运维
+│   ├── docker/                    # Docker / docker-compose 配置
+│   ├── scripts/                   # 初始化脚本（init_db 等）
+│   └── monitoring/                # 监控与日志（可后续补充）
+├── frontend/                      # 前端代码（后续阶段）
+│   ├── pc_web/                    # PC Web UI（React / Streamlit）
+│   └── mobile_app/                # 移动端（Flutter / RN / 小程序）
+└── docs/                          # 文档
+    ├── PLAN.md                    # 当前规划文档
+    └── OPEN_SOURCE_RECOMMENDATIONS.md
+```
+
+> 说明：当前仓库中已有 `PLAN.md` 与 `OPEN_SOURCE_RECOMMENDATIONS.md`，上述结构用于指导后续创建文件夹与服务模块，无需一次性全部创建，可按阶段逐步落地。
+
+### 8.2 单个服务子项目结构（以 `asset_service` 为例）
+
+```text
+services/asset_service/
+├── app/
+│   ├── api/                   # 路由与请求处理（FastAPI 路由）
+│   │   ├── v1/
+│   │   │   ├── assets.py      # /assets 相关接口
+│   │   │   └── health.py      # 健康检查
+│   ├── core/                  # 服务级配置
+│   │   ├── config.py          # 读取共享配置并做本服务特定配置
+│   │   └── security.py        # 与鉴权相关的辅助（如解析 JWT）
+│   ├── models/                # SQLAlchemy 模型（也可放在 shared/db 中共享）
+│   ├── schemas/               # Pydantic 模型（请求 / 响应结构）
+│   ├── services/              # 业务逻辑（与数据库、对象存储交互）
+│   │   ├── asset_manager.py   # Asset CRUD 与查询
+│   │   ├── file_manager.py    # 与 MinIO 交互
+│   │   └── parse_pipeline.py  # 调用 Unstructured / OCR 的解析流水线
+│   └── main.py                # FastAPI 入口（包含 app 实例与路由挂载）
+├── tests/                     # 单元测试
+├── requirements.txt           # 本服务依赖（也可在根目录集中管理）
+└── Dockerfile                 # 容器化配置（可选，后续阶段使用）
+```
+
+其他服务（`project_service`, `timeseries_service`, `ai_orchestrator_service` 等）可以复用类似结构，只是 `api/` 和 `services/` 中的具体文件与职责不同。
+
+### 8.3 各服务模块职责与依赖
+
+- **auth_service**
+  - 职责：用户、角色、权限、JWT 认证；为其他服务提供鉴权中间件或远程校验接口.
+  - 依赖：`shared.db`（用户表）、`shared.config`、密码哈希库.
+
+- **project_service**
+  - 职责：管理 `Project/Building/Zone/System/Device` CRUD；提供“项目结构树”查询接口.
+  - 依赖：PostgreSQL（基础表）、`shared.db` 中的 ORM 模型.
+
+- **asset_service**
+  - 职责：管理 `Asset/FileBlob/AssetStructuredPayload/AssetFeature`；实现文件上传、解析、版本管理与查询.
+  - 依赖：PostgreSQL + TimescaleDB（可选）、MinIO、Unstructured、PyMuPDF、PaddleOCR、LlamaIndex（用于建立索引）、`shared.db`.
+
+- **timeseries_service**
+  - 职责：管理 `SensorPoint/SensorData`；提供能耗数据写入、聚合查询、对标统计等接口.
+  - 依赖：PostgreSQL + TimescaleDB、`shared.db`.
+
+- **search_service**
+  - 职责：对上提供统一检索接口（按项目/模态/标签/语义等检索 `Asset` 与案例）；对下封装 pgvector/Qdrant 与 LlamaIndex.
+  - 依赖：PostgreSQL（pgvector）、Qdrant（第二阶段）、LlamaIndex、`shared.db`.
+
+- **ai_orchestrator_service**
+  - 职责：封装 Claude 调用；实现“数据准备 → 模型推理 → 规则校验 → 结果汇总”等 Agent 流程；对外暴露诊断与报告生成 API.
+  - 依赖：`search_service`、`expert_rule_service`、Claude SDK 或 HTTP API、`shared.config`.
+
+- **expert_rule_service**
+  - 职责：维护 `ExpertRule/CaseLibrary`；执行 jsonlogic 规则评估；提供规则结果与推荐列表.
+  - 依赖：PostgreSQL（规则与案例表）、jsonlogic 库、`shared.db`.
+
+### 8.4 渐进式落地建议
+
+- **阶段 1**：
+  - 只创建一个统一的 `backend` 服务目录（如 `services/backend/`），在其中实现 `Project/Asset/TimeSeries/ExpertRule/Search/AI-Orchestrator` 的路由与逻辑，减少拆分复杂度；
+  - 使用 `shared/db` 管理所有 ORM 模型，用单一 FastAPI 应用快速跑通端到端流程.
+
+- **阶段 2 及以后**：
+  - 按上文结构逐步拆分为多个独立服务（每个有自己的 `main.py`、Dockerfile 等），
+  - 在基础设施层增加 API 网关与服务发现（如 Traefik / Nginx / Kubernetes Ingress）。
+
+---
+
+## 9. 核心模态处理优化建议
+
+### 9.1 现场图片处理优化
+
+#### 智能分流策略
+
+**目标**：根据图片类型自动选择最优处理方式
+
+| 图片类型 | 处理方式 | 成本 | 适用场景 |
+|---------|---------|------|---------|
+| 表具/铭牌 | OCR + 规则匹配 | 免费 | 结构化信息明确 |
+| 现场问题照片 | Claude Vision 多模态 | 按次计费 | 需要语义理解 |
+
+**实现要点**：
+- 先执行 OCR 获取文本
+- 基于文本特征 + 用户备注判断类型
+- 铭牌关键词：型号、功率、电压、厂家
+- 检查关键词：检查、问题、异常、漏气、状态
+
+**参考实现**：`ImageRoutingService`（见 TECHNICAL_GUIDES.md）
+
+---
+
+### 9.2 数据表格处理优化
+
+#### 大模型 Skills 封装
+
+**核心能力**：
+1. **数据清洗**：识别表格结构、标准化字段、异常值检测、缺失值处理
+2. **数据分析**：趋势分析、异常检测、对比分析
+3. **历史对比**：支持不同时期数据对比（本月 vs 上月、改造前 vs 后）
+
+**表格类型**：
+- 能耗数据表格（电/水/气/热）
+- 设备运行数据表格（温度、压力、电流、频率）
+
+**输出格式**：
+```json
+{
+  "cleaned_data": [...],
+  "standardization_log": [...],
+  "quality_metrics": {
+    "total_rows": 总行数,
+    "complete_rows": 完整行数,
+    "missing_value_rate": 缺失率,
+    "grade": "A/B/C/D"
+  }
+}
+```
+
+---
+
+### 9.3 诊断分析优化
+
+#### 多轮诊断机制
+
+**问题**：一次诊断可能回答不了所有问题
+
+**优化**：
+- 第一轮诊断：基于现有资料回答问题
+- 识别未回答问题，生成补充资料建议
+- 第二轮诊断：补充资料后继续分析
+
+**输出示例**：
+```json
+{
+  "matched_issues": [...],
+  "unanswered_questions": [
+    {
+      "question": "是否存在冷桥现象？",
+      "reason": "缺少现场照片",
+      "suggested_actions": ["补充围护结构现场照片"]
+    }
+  ],
+  "followup_needed": true
+}
+```
+
+---
+
+### 9.4 用户体验优化
+
+#### 用户反馈闭环
+
+**价值**：
+- 用户修正是免费的标注数据
+- 累积反馈可优化规则，降低 AI 依赖
+- 提高系统对特定项目的适应性
+
+**实现**：
+```python
+{
+  "ai_result": {...},
+  "user_correction": {...},
+  "feedback_type": "field_extraction" | "issue_detection"
+}
+```
+
+**应用**：
+- 规则解析错误 → 触发规则优化
+- AI 识别不准确 → 记录为训练样本
+
+---
+
+#### 异步处理 + 进度反馈
+
+**场景**：AI 分析耗时较长，用户不应阻塞等待
+
+**方案**：
+1. 上传成功 → 立即返回 `task_id`
+2. 后台异步处理（Celery/任务队列）
+3. 客户端轮询或 WebSocket 推送进度
+
+**API 示例**：
+```
+POST /upload_field_photo → 返回 task_id
+GET /tasks/{task_id} → 查询状态和结果
+```
+
+---
+
+#### 数据质量评分
+
+**目的**：帮助用户判断数据可靠性
+
+**评分维度**：
+- **完整度**：非空数据行占比
+- **可靠度**：1 - 异常值占比
+
+**评级标准**：
+- A（优秀）：≥ 90%
+- B（良好）：≥ 80%
+- C（一般）：≥ 60%
+- D（较差）：< 60%（建议重新采集）
+
+---
+
+### 9.5 成本优化策略
+
+| 数据类型 | 处理策略 | 成本 |
+|---------|---------|------|
+| 已知模式 | 预训练规则库 | 一次性成本 |
+| 批量数据 | 批量 API | 折扣价 |
+| 复杂场景 | Claude API | 按次计费 |
+
+**优化要点**：
+- 优先使用规则（免费）
+- 批量处理降低单价
+- 缓存常见模式的结果
+
+---
+
+### 9.6 移动端体验优化
+
+**基础功能（阶段 1）**：
+- 文字备注输入
+- 图片上传
+
+**增强功能（阶段 2）**：
+- 语音转文字（备注输入）
+- 批量上传（减少网络请求）
+- 进度反馈（实时显示处理状态）
+
+**高级功能（阶段 3）**：
+- 离线缓存（无网时先保存）
+- 定位/二维码设备识别
+
+**API 设计**：
+```python
+POST /upload_field_photo
+- file: 图片文件
+- notes: 文字备注
+- audio: 语音文件（可选，阶段 2）
+→ 返回 task_id（阶段 2 开始支持异步）
+```
+
+---
+
+## 10. 实施优先级与验收标准
+
+### 阶段 1：核心功能（必须做）
+
+**验收标准**：
+1. ✅ 现场图片智能分流（OCR+规则 vs Claude Vision） → 能自动识别铭牌/现场照片并选择处理方式
+2. ✅ 数据表格清洗 + 分析 Skills → 能上传 Excel/CSV 并获得清洗后的数据 + 分析报告
+3. ✅ 诊断问题清单基础功能 → 能根据项目资料回答专家规则清单中的问题
+4. ✅ 用户反馈闭环 → 用户能修正 AI 结果，系统能记录反馈
+
+**技术债务**：暂不实现异步处理，所有 API 同步返回
+
+---
+
+### 阶段 2：体验提升（建议做）
+
+**验收标准**：
+1. ✅ 异步处理 + 进度反馈 → 上传后立即返回 task_id，能查询处理进度
+2. ✅ 数据质量评分 → 表格数据清洗后显示 A/B/C/D 评级
+3. ✅ 移动端语音输入支持 → 能录制语音并自动转文字为备注
+4. ✅ 批量上传 → 支持一次上传多张图片/多个表格
+5. ✅ 用户反馈学习 → 累积的反馈能自动优化规则（至少 3 个常见模式）
+
+**技术债务**：暂不实现历史对比
+
+---
+
+### 阶段 3：深度优化（可选）
+
+**验收标准**：
+1. ✅ 完整 Agent 工作流 → 能自动完成年度体检 → 诊断 → 报告全流程
+2. ✅ 多轮诊断 → 能识别未回答问题并给出补充资料建议
+3. ✅ 历史数据对比 → 能对比改造前后、同期数据
+4. ✅ 成本优化 → 已知模式使用规则（零成本），批量 API 调用成本降低 20%+
+5. ✅ 移动端离线缓存 → 无网时能缓存数据，联网后自动上传
