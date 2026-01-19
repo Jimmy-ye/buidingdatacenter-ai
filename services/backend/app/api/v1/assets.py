@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from shared.config.settings import get_settings
 from shared.db.models_asset import Asset, AssetStructuredPayload, FileBlob
+from shared.db.models_project import Building, Zone, BuildingSystem, Device
 from shared.db.session import get_db
 from ...schemas.asset import AssetCreate, AssetRead, AssetDetailRead, SceneIssueReportPayload
 from ...services.image_pipeline import process_image_with_ocr, route_image_asset
@@ -17,13 +18,189 @@ router = APIRouter()
 settings = get_settings()
 
 
+def _resolve_engineering_hierarchy(
+    db: Session,
+    project_id: uuid.UUID,
+    building_id: Optional[uuid.UUID] = None,
+    zone_id: Optional[uuid.UUID] = None,
+    system_id: Optional[uuid.UUID] = None,
+    device_id: Optional[uuid.UUID] = None,
+):
+    """Validate Building/Zone/System/Device chain and build a human-readable path.
+
+    This does not modify the database, it only:
+    - Ensures all referenced entities exist
+    - Ensures they are consistent and belong to the given project
+    - Returns the resolved objects and a display path
+    """
+
+    building: Optional[Building] = None
+    zone: Optional[Zone] = None
+    system: Optional[BuildingSystem] = None
+    device: Optional[Device] = None
+
+    # Building
+    if building_id is not None:
+        building = db.query(Building).filter_by(id=building_id).one_or_none()
+        if building is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Building not found")
+        if building.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Building does not belong to the given project",
+            )
+
+    # Zone
+    if zone_id is not None:
+        zone = db.query(Zone).filter_by(id=zone_id).one_or_none()
+        if zone is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Zone not found")
+
+        if building is not None and zone.building_id != building.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Zone does not belong to the given building",
+            )
+
+        if building is None:
+            building = db.query(Building).filter_by(id=zone.building_id).one_or_none()
+            if building is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Zone refers to a missing building",
+                )
+
+        if building.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Zone's building does not belong to the given project",
+            )
+
+    # System
+    if system_id is not None:
+        system = db.query(BuildingSystem).filter_by(id=system_id).one_or_none()
+        if system is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="System not found")
+
+        if building is not None and system.building_id != building.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="System does not belong to the given building",
+            )
+
+        if building is None:
+            building = db.query(Building).filter_by(id=system.building_id).one_or_none()
+            if building is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="System refers to a missing building",
+                )
+
+        if building.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="System's building does not belong to the given project",
+            )
+
+    # Device
+    if device_id is not None:
+        device = db.query(Device).filter_by(id=device_id).one_or_none()
+        if device is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Device not found")
+
+        # Validate against provided system
+        if system is not None and device.system_id != system.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device does not belong to the given system",
+            )
+
+        # If no system provided but device has one, adopt it
+        if system is None and device.system_id is not None:
+            system = db.query(BuildingSystem).filter_by(id=device.system_id).one_or_none()
+            if system is not None:
+                if building is not None and system.building_id != building.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Device's system building does not match the given building",
+                    )
+                if building is None:
+                    building = db.query(Building).filter_by(id=system.building_id).one_or_none()
+
+        # Validate against provided zone
+        if zone is not None and device.zone_id != zone.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device does not belong to the given zone",
+            )
+
+        # If no zone provided but device has one, adopt it
+        if zone is None and device.zone_id is not None:
+            zone = db.query(Zone).filter_by(id=device.zone_id).one_or_none()
+            if zone is not None:
+                if building is not None and zone.building_id != building.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Device's zone building does not match the given building",
+                    )
+                if building is None:
+                    building = db.query(Building).filter_by(id=zone.building_id).one_or_none()
+
+        if building is not None and building.project_id != project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device's building does not belong to the given project",
+            )
+
+        # Optional strict rule: device must belong to a system
+        if system is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Device must belong to a System",
+            )
+
+    # Build path string
+    parts = []
+    if building is not None:
+        parts.append(building.name or "Building")
+    if zone is not None:
+        parts.append(zone.name or "Zone")
+    if system is not None:
+        parts.append(system.name or system.type or "System")
+    if device is not None:
+        label = device.model or device.device_type or "Device"
+        parts.append(label)
+
+    path = " / ".join(parts) if parts else None
+
+    return {
+        "building": building,
+        "zone": zone,
+        "system": system,
+        "device": device,
+        "path": path,
+    }
+
+
 @router.get("/", response_model=List[AssetRead], summary="List assets")
 async def list_assets(
     project_id: Optional[uuid.UUID] = Query(default=None, description="Filter by project ID"),
     modality: Optional[str] = Query(default=None, description="Filter by modality, e.g. image, table"),
     content_role: Optional[str] = Query(default=None, description="Filter by high-level content role"),
+    building_id: Optional[uuid.UUID] = Query(default=None, description="Filter by building ID"),
+    zone_id: Optional[uuid.UUID] = Query(default=None, description="Filter by zone ID"),
+    system_id: Optional[uuid.UUID] = Query(default=None, description="Filter by system ID"),
+    device_id: Optional[uuid.UUID] = Query(default=None, description="Filter by device ID"),
     db: Session = Depends(get_db),
 ) -> List[AssetRead]:
+    """List assets with optional multi-dimensional filters.
+
+    Supports filtering by:
+    - project
+    - modality / content_role
+    - building / zone / system / device
+    """
+
     query = db.query(Asset)
     if project_id is not None:
         query = query.filter(Asset.project_id == project_id)
@@ -31,6 +208,14 @@ async def list_assets(
         query = query.filter(Asset.modality == modality)
     if content_role is not None:
         query = query.filter(Asset.content_role == content_role)
+    if building_id is not None:
+        query = query.filter(Asset.building_id == building_id)
+    if zone_id is not None:
+        query = query.filter(Asset.zone_id == zone_id)
+    if system_id is not None:
+        query = query.filter(Asset.system_id == system_id)
+    if device_id is not None:
+        query = query.filter(Asset.device_id == device_id)
 
     assets = query.order_by(Asset.capture_time.desc().nullslast()).all()
     return assets
@@ -160,12 +345,30 @@ async def upload_image_with_note(
     source: str = Query(..., description="Source, e.g. mobile, pc_upload"),
     file: UploadFile = File(...),
     content_role: Optional[str] = Query(default=None, description="meter, nameplate, scene_issue, etc."),
+    building_id: Optional[str] = Query(default=None, description="Building UUID"),
+    zone_id: Optional[str] = Query(default=None, description="Zone UUID"),
+    system_id: Optional[str] = Query(default=None, description="System UUID"),
+    device_id: Optional[str] = Query(default=None, description="Device UUID"),
     note: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     auto_route: bool = Query(False, description="If true, automatically route image after upload"),
     db: Session = Depends(get_db),
 ) -> AssetRead:
     project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+
+    building_uuid = uuid.UUID(building_id) if building_id else None
+    zone_uuid = uuid.UUID(zone_id) if zone_id else None
+    system_uuid = uuid.UUID(system_id) if system_id else None
+    device_uuid = uuid.UUID(device_id) if device_id else None
+
+    hierarchy = _resolve_engineering_hierarchy(
+        db,
+        project_id=project_id_uuid,
+        building_id=building_uuid,
+        zone_id=zone_uuid,
+        system_id=system_uuid,
+        device_id=device_uuid,
+    )
 
     base_dir = settings.local_storage_dir
     file_ext = os.path.splitext(file.filename or "")[1]
@@ -194,6 +397,10 @@ async def upload_image_with_note(
 
     asset = Asset(
         project_id=project_id_uuid,
+        building_id=hierarchy["building"].id if hierarchy["building"] is not None else None,
+        zone_id=hierarchy["zone"].id if hierarchy["zone"] is not None else None,
+        system_id=hierarchy["system"].id if hierarchy["system"] is not None else None,
+        device_id=hierarchy["device"].id if hierarchy["device"] is not None else None,
         modality="image",
         source=source,
         content_role=content_role,
@@ -205,6 +412,10 @@ async def upload_image_with_note(
     db.add(asset)
     db.commit()
     db.refresh(asset)
+
+    # Attach human-readable engineering path for response convenience
+    if hierarchy["path"] is not None:
+        setattr(asset, "engineer_path", hierarchy["path"])
 
     # Optional automatic routing based on content_role
     if auto_route and asset.id:
@@ -229,11 +440,29 @@ async def upload_table_asset(
     source: str,
     file: UploadFile = File(...),
     content_role: Optional[str] = Query(default=None, description="energy_table, runtime_table, etc."),
+    building_id: Optional[str] = Query(default=None, description="Building UUID"),
+    zone_id: Optional[str] = Query(default=None, description="Zone UUID"),
+    system_id: Optional[str] = Query(default=None, description="System UUID"),
+    device_id: Optional[str] = Query(default=None, description="Device UUID"),
     title: Optional[str] = None,
     description: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> AssetRead:
     project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+
+    building_uuid = uuid.UUID(building_id) if building_id else None
+    zone_uuid = uuid.UUID(zone_id) if zone_id else None
+    system_uuid = uuid.UUID(system_id) if system_id else None
+    device_uuid = uuid.UUID(device_id) if device_id else None
+
+    hierarchy = _resolve_engineering_hierarchy(
+        db,
+        project_id=project_id_uuid,
+        building_id=building_uuid,
+        zone_id=zone_uuid,
+        system_id=system_uuid,
+        device_id=device_uuid,
+    )
 
     base_dir = settings.local_storage_dir
     file_ext = os.path.splitext(file.filename or "")[1]
@@ -262,6 +491,10 @@ async def upload_table_asset(
 
     asset = Asset(
         project_id=project_id_uuid,
+        building_id=hierarchy["building"].id if hierarchy["building"] is not None else None,
+        zone_id=hierarchy["zone"].id if hierarchy["zone"] is not None else None,
+        system_id=hierarchy["system"].id if hierarchy["system"] is not None else None,
+        device_id=hierarchy["device"].id if hierarchy["device"] is not None else None,
         modality="table",
         source=source,
         content_role=content_role,
@@ -273,6 +506,8 @@ async def upload_table_asset(
     db.add(asset)
     db.commit()
     db.refresh(asset)
+    if hierarchy["path"] is not None:
+        setattr(asset, "engineer_path", hierarchy["path"])
     return asset
 
 
@@ -307,12 +542,30 @@ async def upload_asset(
     modality: str,
     source: str,
     file: UploadFile = File(...),
+    building_id: Optional[str] = Query(default=None, description="Building UUID"),
+    zone_id: Optional[str] = Query(default=None, description="Zone UUID"),
+    system_id: Optional[str] = Query(default=None, description="System UUID"),
+    device_id: Optional[str] = Query(default=None, description="Device UUID"),
     title: Optional[str] = None,
     description: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> AssetRead:
     # Convert string UUID to UUID object
     project_id_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
+
+    building_uuid = uuid.UUID(building_id) if building_id else None
+    zone_uuid = uuid.UUID(zone_id) if zone_id else None
+    system_uuid = uuid.UUID(system_id) if system_id else None
+    device_uuid = uuid.UUID(device_id) if device_id else None
+
+    hierarchy = _resolve_engineering_hierarchy(
+        db,
+        project_id=project_id_uuid,
+        building_id=building_uuid,
+        zone_id=zone_uuid,
+        system_id=system_uuid,
+        device_id=device_uuid,
+    )
 
     base_dir = settings.local_storage_dir
     file_ext = os.path.splitext(file.filename or "")[1]
@@ -341,6 +594,10 @@ async def upload_asset(
 
     asset = Asset(
         project_id=project_id_uuid,
+        building_id=hierarchy["building"].id if hierarchy["building"] is not None else None,
+        zone_id=hierarchy["zone"].id if hierarchy["zone"] is not None else None,
+        system_id=hierarchy["system"].id if hierarchy["system"] is not None else None,
+        device_id=hierarchy["device"].id if hierarchy["device"] is not None else None,
         modality=modality,
         source=source,
         title=title,
@@ -351,4 +608,6 @@ async def upload_asset(
     db.add(asset)
     db.commit()
     db.refresh(asset)
+    if hierarchy["path"] is not None:
+        setattr(asset, "engineer_path", hierarchy["path"])
     return asset

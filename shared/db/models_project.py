@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 
 from sqlalchemy import Column, Date, Float, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -33,6 +33,7 @@ class Building(Base):
     floor_area = Column(Float, nullable=True)
     year_built = Column(Float, nullable=True)
     energy_grade = Column(String(10), nullable=True)
+    tags = Column(JSONB, nullable=True)
 
     project = relationship("Project", back_populates="buildings")
     zones = relationship("Zone", back_populates="building", cascade="all, delete-orphan")
@@ -47,6 +48,7 @@ class Zone(Base):
     name = Column(String(200), nullable=False)
     type = Column(String(100), nullable=True)
     geometry_ref = Column(String(500), nullable=True)
+    tags = Column(JSONB, nullable=True)
 
     building = relationship("Building", back_populates="zones")
     devices = relationship("Device", back_populates="zone", cascade="all, delete-orphan")
@@ -60,6 +62,7 @@ class BuildingSystem(Base):
     type = Column(String(100), nullable=False)
     name = Column(String(200), nullable=True)
     description = Column(String(500), nullable=True)
+    tags = Column(JSONB, nullable=True)
 
     building = relationship("Building", back_populates="systems")
     devices = relationship("Device", back_populates="system", cascade="all, delete-orphan")
@@ -75,6 +78,7 @@ class Device(Base):
     model = Column(String(200), nullable=True)
     rated_power = Column(Float, nullable=True)
     serial_no = Column(String(100), nullable=True)
+    tags = Column(JSONB, nullable=True)
 
     system = relationship("BuildingSystem", back_populates="devices")
     zone = relationship("Zone", back_populates="devices")

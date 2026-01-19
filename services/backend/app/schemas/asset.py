@@ -44,6 +44,8 @@ class AssetRead(AssetBase):
 
     id: uuid.UUID
     file_id: uuid.UUID
+    # Human-readable engineering path like "Building / Zone / System / Device"
+    engineer_path: Optional[str] = None
 
 
 class AssetStructuredPayloadRead(BaseModel):
