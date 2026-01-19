@@ -45,10 +45,24 @@ async def get_asset(
     asset_id: uuid.UUID = Path(..., description="Asset ID"),
     db: Session = Depends(get_db),
 ) -> AssetDetailRead:
-    asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
+    from shared.db.models_asset import FileBlob
+
+    # Convert UUID to string for SQLite compatibility
+    asset_id_str = str(asset_id)
+
+    asset = db.query(Asset).filter(Asset.id == asset_id_str).one_or_none()
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
-    return asset
+
+    detail = AssetDetailRead.model_validate(asset)
+
+    # Manually query file_blob to avoid SQLAlchemy relationship issues with SQLite
+    if asset.file_id:
+        file_blob = db.query(FileBlob).filter(FileBlob.id == str(asset.file_id)).one_or_none()
+        if file_blob is not None:
+            detail.file_path = file_blob.path
+
+    return detail
 
 
 @router.post(
