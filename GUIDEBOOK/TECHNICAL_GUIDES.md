@@ -18,6 +18,7 @@
    - [核心组成](#核心组成-1)
    - [依赖库详解](#依赖库详解-1)
    - [OCR 图片识别流程](#ocr-图片识别流程)
+   - [GLM-4V 场景问题分析流程](#glm-4v-场景问题分析流程)
    - [代码层面解析](#代码层面解析-1)
    - [实际应用场景](#实际应用场景-1)
    - [常见问题与解决](#常见问题与解决)
@@ -49,16 +50,22 @@ services/backend/
 │   ├── main.py              # FastAPI 应用入口（总经理）
 │   └── api/
 │       └── v1/
-│           └── health.py    # API 路由（服务员）
+│           ├── health.py    # API 路由（服务员）
+│           ├── projects.py  # 项目管理
+│           └── assets.py    # 资产管理
+│   ├── schemas/             # Pydantic 数据模型
+│   └── services/            # 业务逻辑
+│       └── image_pipeline.py
 ├── requirements.txt         # Python 依赖清单
-└──
 
 shared/                      # 共享资源库
 ├── config/
 │   └── settings.py          # 配置中心
 ├── db/
 │   ├── base.py              # 数据库地基（ORM 基类）
-│   └── session.py           # 数据库连接池
+│   ├── session.py           # 数据库连接池
+│   ├── models_project.py    # 项目相关模型
+│   └── models_asset.py      # 资产相关模型
 └── utils/                   # 工具箱（待开发）
 ```
 
@@ -67,10 +74,11 @@ shared/                      # 共享资源库
 | 组件 | 文件 | 职责 | 类比 |
 |------|------|------|------|
 | Web 框架 | main.py | 统筹全局，管理路由 | 总经理 |
-| API 路由 | health.py | 处理具体请求 | 服务员 |
+| API 路由 | health.py, projects.py, assets.py | 处理具体请求 | 服务员 |
 | 配置管理 | settings.py | 管理环境配置 | 配置中心 |
 | 数据库基类 | base.py | ORM 声明式基类 | 花名册模板 |
 | 会话管理 | session.py | 数据库连接池 | 连接池管理器 |
+| 数据模型 | models_project.py, models_asset.py | 数据表定义 | 数据字典 |
 
 ---
 
@@ -82,6 +90,8 @@ shared/                      # 共享资源库
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+python-dotenv
 ```
 
 ### 1. FastAPI - Web 框架
@@ -104,7 +114,7 @@ FastAPI 提供：
 ```python
 from fastapi import FastAPI
 
-app = FastAPI(title="BDC-AI Backend", version="0.1.0")
+app = FastAPI(title="BDC-AI Backend", version="0.3.0")
 
 @app.get("/api/v1/health/")
 async def health_check():
@@ -187,8 +197,8 @@ def create_project(name, location):
 
     # 手写 SQL（容易出错）
     sql = """
-        INSERT INTO projects (name, location, created_at)
-        VALUES (%s, %s, NOW())
+        INSERT INTO projects (id, name, location, created_at)
+        VALUES (gen_random_uuid(), %s, %s, NOW())
         RETURNING id
     """
     cursor.execute(sql, (name, location))
@@ -198,15 +208,69 @@ def create_project(name, location):
 
 # ✓ 有 SQLAlchemy（用 Python 对象）：
 from shared.db.session import SessionLocal
-from shared.db.models import Project
+from shared.db.models_project import Project
+import uuid
 
 def create_project(name, location):
     db = SessionLocal()
-    project = Project(name=name, location=location)
+    project = Project(id=uuid.uuid4(), name=name, location=location)
     db.add(project)
     db.commit()
     db.refresh(project)
     return project.id
+```
+
+### 4. PostgreSQL - 关系型数据库
+
+**作用**：存储和管理项目数据
+
+**通俗理解**：就像**文件柜 + 索引系统**
+
+```
+PostgreSQL 提供：
+├── 数据持久化：数据不会丢失
+├── UUID 类型：原生支持 UUID（主键）
+├── JSON 类型：存储结构化数据
+├── 外键约束：保证数据完整性
+├── 事务支持：ACID 特性
+└── 并发控制：多用户同时访问
+
+对比 SQLite：
+SQLite：轻量级，适合单机、单用户
+PostgreSQL：企业级，适合服务器、多用户、高并发
+```
+
+**迁移原因**：
+```python
+# SQLite 的问题：
+# ✗ 不支持 UUID(as_uuid=True)
+# ✗ 外键约束较弱
+# ✗ 并发性能有限
+
+# PostgreSQL 的优势：
+# ✓ 原生 UUID 支持
+# ✓ 严格的外键约束
+# ✓ 更好的并发性能
+# ✓ 支持 JSON、数组等高级类型
+# ✓ 生产环境就绪
+```
+
+### 5. psycopg2-binary - PostgreSQL 驱动
+
+**作用**：Python 与 PostgreSQL 之间的桥梁
+
+**通俗理解**：就像**电话线**
+
+```
+psycopg2-binary 提供：
+├── 网络连接：连接到 PostgreSQL 服务器
+├── 协议转换：Python 调用 → PostgreSQL 协议
+├── 数据传输：发送 SQL、接收结果
+└── 二进制模式：高效传输数据（bytea）
+
+类比：
+SQLAlchemy = 翻译官（Python ↔ SQL）
+psycopg2-binary = 电话线（Python ↔ PostgreSQL）
 ```
 
 ---
@@ -218,7 +282,7 @@ def create_project(name, location):
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     用户（浏览器）                           │
-│                  访问 http://localhost:8000/api/v1/health/  │
+│                  访问 http://localhost:8000/api/v1/projects/  │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓ 1. HTTP 请求
 ┌──────────────────────────────────────────────────────────────┐
@@ -232,8 +296,8 @@ def create_project(name, location):
 └──────────────────────┬──────────────────────────────────────┘
                        ↓ 3. 调用处理函数
 ┌──────────────────────────────────────────────────────────────┐
-│          health.py 中的 health_check() 函数                  │
-│  工作：执行业务逻辑，返回结果字典                            │
+│          projects.py 中的 list_projects() 函数               │
+│  工作：执行数据库查询，返回结果列表                          │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓ 4. 返回结果
 ┌──────────────────────────────────────────────────────────────┐
@@ -243,22 +307,8 @@ def create_project(name, location):
                        ↓ 5. HTTP 响应
 ┌──────────────────────────────────────────────────────────────┐
 │                   用户浏览器                                 │
-│              显示：{"status":"ok"}                           │
+│           显示：[{"id": "...", "name": "..."}, ...]         │
 └──────────────────────────────────────────────────────────────┘
-```
-
-### 时间线
-
-```
-T0: 用户在浏览器输入 URL 并回车
-T1: Uvicorn 收到 HTTP 请求
-T2: FastAPI 查找路由处理器
-T3: 调用 health_check() 函数
-T4: health_check() 返回 {"status":"ok"}
-T5: FastAPI 构造 HTTP 响应
-T6: Uvicorn 发送响应给浏览器
-
-总耗时：通常 < 10 毫秒
 ```
 
 ---
@@ -273,19 +323,25 @@ T6: Uvicorn 发送响应给浏览器
 
 ```python
 from fastapi import FastAPI
-from .api.v1 import health
+from .api.v1 import health, projects, assets
 
 # 创建 FastAPI 应用实例
 # 就像注册一家公司，领取营业执照
-app = FastAPI(title="BDC-AI Backend", version="0.1.0")
+app = FastAPI(title="BDC-AI Backend", version="0.3.0")
 
 # 注册路由（挂载服务台）
 # 就像在公司大厅设置服务台
-app.include_router(
-    health.router,           # 哪个服务台
-    prefix="/api/v1/health", # 在哪个位置
-    tags=["health"]          # 服务类型标签
-)
+app.include_router(health.router, prefix="/api/v1/health", tags=["health"])
+app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"])
+app.include_router(assets.router, prefix="/api/v1/assets", tags=["assets"])
+
+@app.on_event("startup")
+def on_startup() -> None:
+    """应用启动时创建所有数据库表"""
+    from shared.db.base import Base
+    from shared.db.session import engine
+
+    Base.metadata.create_all(bind=engine)
 
 # 根路径处理
 @app.get("/")
@@ -293,79 +349,7 @@ async def read_root() -> dict:
     return {"status": "ok"}
 ```
 
-**执行过程**：
-
-```
-启动时：
-1. FastAPI() 创建应用对象
-   → 创建"路由表"（空的）
-
-2. app.include_router(health.router, ...)
-   → 把 health.py 的路由添加到路由表
-   → 路由表现在有：
-   ├── /api/v1/health/ → health_check()
-   └── / → read_root()
-
-3. Uvicorn 启动，开始监听端口
-
-运行时：
-1. 用户访问 http://localhost:8000/api/v1/health/
-2. Uvicorn 收到请求，交给 FastAPI
-3. FastAPI 查路由表：找到了！是 health_check()
-4. 调用 health_check()
-5. 收到返回值 {"status": "ok"}
-6. 转成 JSON，发送给用户
-```
-
-**关键概念**：
-
-- **Router（路由器）**：组织相关 API 端点的工具
-- **Prefix（前缀）**：URL 路径前缀，便于版本管理
-- **Tags（标签）**：用于 API 文档分组
-
-### 2. health.py - API 路由
-
-**位置**：`services/backend/app/api/v1/health.py`
-
-**代码**：
-
-```python
-from fastapi import APIRouter
-
-# 创建路由器
-# 就像在服务台安装一个分机
-router = APIRouter()
-
-# 定义处理函数
-@router.get("/", summary="Health check")
-async def health_check() -> dict:
-    return {"status": "ok"}
-```
-
-**装饰器详解**：
-
-```python
-@router.get("/", summary="Health check")
-#         ↑      ↑
-#         │      └── 文档说明（在 /docs 显示）
-#         └── HTTP 方法 + 路径
-
-# 等价于：
-# "如果有人用 GET 方法访问这个路径，就调用这个函数"
-```
-
-**async 的作用**：
-
-```python
-async def health_check():
-    # 异步函数
-    # 优势：可以处理并发请求
-    # 场景：100个人同时访问健康检查
-    #       异步：可以同时处理
-    #       同步：要排队，一个一个处理
-```
-
-### 3. settings.py - 配置管理
+### 2. settings.py - 配置管理
 
 **位置**：`shared/config/settings.py`
 
@@ -374,6 +358,11 @@ async def health_check():
 ```python
 import os
 from functools import lru_cache
+from dotenv import load_dotenv
+from pathlib import Path
+
+# 加载 .env 文件
+load_dotenv(Path(__file__).parent.parent.parent / ".env")
 
 class Settings:
     def __init__(self) -> None:
@@ -382,7 +371,12 @@ class Settings:
             "BDC_DATABASE_URL",
             "postgresql://admin:password@localhost:5432/bdc_ai"
         )
-        self.minio_endpoint = os.getenv("BDC_MINIO_ENDPOINT", "localhost:9000")
+        self.local_storage_dir = os.getenv("BDC_LOCAL_STORAGE_DIR", "data/assets")
+
+        # GLM API 配置
+        self.glm_api_key = os.getenv("GLM_API_KEY", "")
+        self.glm_base_url = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
+        self.glm_vision_model = os.getenv("GLM_VISION_MODEL", "glm-4v")
 
 # 使用 lru_cache 装饰器实现单例模式
 @lru_cache()
@@ -390,90 +384,7 @@ def get_settings() -> Settings:
     return Settings()
 ```
 
-**为什么用 lru_cache？**
-
-```python
-# 没有 cache：
-settings1 = Settings()  # 创建对象1
-settings2 = Settings()  # 创建对象2
-# 问题：每次都创建新对象，浪费内存
-
-# 有 cache：
-settings1 = get_settings()  # 创建对象，缓存
-settings2 = get_settings()  # 返回缓存的对象（同一个）
-# 好处：全局唯一，节省资源，配置一致
-```
-
-**实际使用**：
-
-```python
-from shared.config.settings import get_settings
-
-settings = get_settings()
-print(settings.database_url)
-# → "postgresql://admin:password@localhost:5432/bdc_ai"
-
-# 修改环境变量后重启：
-# 设置 BDC_DATABASE_URL=新地址
-# 重启程序，自动读取新配置
-```
-
-### 4. base.py - 数据库基类
-
-**位置**：`shared/db/base.py`
-
-**代码**：
-
-```python
-from sqlalchemy.orm import declarative_base
-
-# 创建声明式基类
-# 就像准备一本"花名册模板"
-Base = declarative_base()
-```
-
-**Base 的作用**：
-
-```python
-# Base 是所有数据模型的"父类"
-
-# 将来创建数据模型时：
-from shared.db.base import Base
-from sqlalchemy import Column, Integer, String
-
-class Project(Base):  # 继承 Base
-    __tablename__ = "projects"  # 表名
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100))
-    location = Column(String(200))
-
-# Base 会自动：
-# 1. 记录这个类（Project）
-# 2. 把它和数据库表（projects）关联
-# 3. 提供 create_all() 等方法
-# 4. 提供 ORM 映射（对象 → 表记录）
-```
-
-**实际使用**：
-
-```python
-# 创建所有表
-from shared.db.base import Base
-from shared.db.session import engine
-
-Base.metadata.create_all(bind=engine)
-# → 自动创建所有继承 Base 的类对应的表
-
-# 相当于执行 SQL：
-# CREATE TABLE projects (
-#     id SERIAL PRIMARY KEY,
-#     name VARCHAR(100),
-#     location VARCHAR(200)
-# );
-```
-
-### 5. session.py - 数据库会话
+### 3. session.py - 数据库会话
 
 **位置**：`shared/db/session.py`
 
@@ -512,8 +423,6 @@ def get_db() -> Generator:
 
 ```python
 engine = create_engine("postgresql://...", pool_size=5, max_overflow=10)
-#                                              ↑            ↑
-#                                          连接池大小    最大溢出
 
 # 引擎维护一个连接池：
 # ┌─────────┬─────────┬─────────┬─────────┬─────────┐
@@ -525,245 +434,6 @@ engine = create_engine("postgresql://...", pool_size=5, max_overflow=10)
 #
 # 当你调用 db.close()：
 # → 把连接归还池子，给其他人用
-```
-
-**连接池的优势**：
-
-```
-❌ 每次创建新连接：
-def get_project(project_id):
-    conn = create_connection()  # 创建连接（耗时，约100ms）
-    result = conn.query(...)
-    conn.close()
-# 问题：频繁创建/关闭连接，很慢
-
-✓ 使用连接池：
-engine = create_engine(..., pool_size=5)
-# → 启动时创建5个连接
-# → 后续复用这些连接
-
-def get_project(project_id):
-    db = SessionLocal()  # 从池中拿连接（快，约1ms）
-    result = db.query(...)
-    db.close()
-# 好处：不用频繁创建，性能提升100倍
-```
-
-**依赖注入工作原理**：
-
-```python
-from fastapi import Depends
-from shared.db.session import get_db
-from sqlalchemy.orm import Session
-
-@app.get("/api/v1/projects/{project_id}")
-def get_project(project_id: int, db: Session = Depends(get_db)):
-    #                    ↑
-    #                    FastAPI 自动调用 get_db()
-    #                    把返回的 db 注入到这里
-
-    project = db.query(Project).filter(Project.id == project_id).first()
-    return project
-
-# 执行流程：
-# 1. 收到请求：GET /api/v1/projects/123
-# 2. FastAPI 看到 db: Session = Depends(get_db)
-# 3. 调用 get_db()：
-#    → db = SessionLocal()
-#    → yield db
-# 4. 执行 get_project(project_id=123, db=<刚才的db>)
-# 5. 函数执行完
-# 6. FastAPI 自动执行 db.close()（finally 块）
-```
-
----
-
-## 实际应用场景
-
-### 场景 1：查询项目列表
-
-**目标**：创建 API 端点返回所有项目列表
-
-**完整实现**：
-
-```python
-# 1. 定义数据模型
-# shared/db/models/project.py
-
-from sqlalchemy import Column, Integer, String, DateTime
-from shared.db.base import Base
-
-class Project(Base):
-    __tablename__ = "projects"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    location = Column(String(200))
-    created_at = Column(DateTime, server_default="NOW()")
-
-# 2. 定义 API 路由
-# services/backend/app/api/v1/projects.py
-
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from shared.db.session import get_db
-from shared.db.models.project import Project
-
-router = APIRouter()
-
-@router.get("/")
-def list_projects(db: Session = Depends(get_db)):
-    # 查询所有项目
-    projects = db.query(Project).all()
-
-    # 返回列表
-    return [
-        {
-            "id": p.id,
-            "name": p.name,
-            "location": p.location,
-            "created_at": p.created_at
-        }
-        for p in projects
-    ]
-
-# 3. 注册路由
-# services/backend/app/main.py
-
-from .api.v1 import projects
-
-app.include_router(
-    projects.router,
-    prefix="/api/v1/projects",
-    tags=["projects"]
-)
-```
-
-**请求流程**：
-
-```
-用户操作：
-1. 浏览器访问：http://localhost:8000/api/v1/projects/
-
-后台处理：
-2. Uvicorn 收到 GET /api/v1/projects/
-3. → FastAPI 路由匹配：找到 list_projects()
-4. → 看到 db: Session = Depends(get_db)
-5. → 调用 get_db()：从连接池拿连接
-6. → 调用 list_projects(db=<连接>)
-7.     → db.query(Project).all()
-8.     → SQLAlchemy 翻译成 SQL：SELECT * FROM projects
-9.     → 发送到数据库
-10.    → 数据库返回结果
-11.    → SQLAlchemy 转成 Python 对象列表
-12. → FastAPI 转成 JSON
-13. → Uvicorn 发送响应
-
-用户看到：
-14. [{"id":1,"name":"项目A",...}, {"id":2,"name":"项目B",...}]
-```
-
-### 场景 2：创建项目并上传文件
-
-**目标**：创建项目并上传相关资料到对象存储
-
-**完整实现**：
-
-```python
-# services/backend/app/api/v1/assets.py
-
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from sqlalchemy.orm import Session
-from shared.db.session import get_db
-from shared.db.models.project import Project
-from shared.db.models.asset import Asset
-from shared.config.settings import get_settings
-import minio
-
-router = APIRouter()
-settings = get_settings()
-
-@router.post("/upload")
-async def upload_asset(
-    project_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    # 步骤 1：验证项目是否存在（数据库操作）
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    # 步骤 2：上传文件到 MinIO（对象存储）
-    client = minio.Minio(
-        settings.minio_endpoint,
-        access_key="minioadmin",
-        secret_key="minioadmin"
-    )
-
-    file_path = f"projects/{project_id}/{file.filename}"
-    client.put_object(
-        "bdc-assets",           # 桶名
-        file_path,              # 存储路径
-        file.file,              # 文件内容
-        length=file.size
-    )
-
-    # 步骤 3：创建资产记录（数据库操作）
-    asset = Asset(
-        project_id=project_id,
-        file_path=file_path,
-        modality="image",
-        status="uploaded"
-    )
-    db.add(asset)
-    db.commit()
-    db.refresh(asset)
-
-    # 步骤 4：返回结果
-    return {
-        "asset_id": asset.id,
-        "file_url": f"http://minio:9000/bdc-assets/{file_path}",
-        "project_id": project_id
-    }
-```
-
-**骨架如何协调各个组件**：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    请求流程                              │
-└─────────────────────────────────────────────────────────┘
-
-用户请求（上传文件）
-    ↓
-┌─────────────────────────────────────────────────────────┐
-│  FastAPI (框架层)                                        │
-│  • 接收文件上传                                          │
-│  • 验证参数                                              │
-│  • 调用处理函数                                          │
-└─────────────────────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────────────────────┐
-│  业务逻辑层                                              │
-│                                                         │
-│  ┌──────────────┬──────────────┬──────────────┐        │
-│  │ 步骤1:       │ 步骤2:       │ 步骤3:       │        │
-│  │ 查询数据库   │ 上传文件     │ 保存记录     │        │
-│  └──────────────┴──────────────┴──────────────┘        │
-│         ↓              ↓              ↓                 │
-└─────────┼──────────────┼──────────────┼─────────────────┘
-          ↓              ↓              ↓
-    ┌──────────┐   ┌──────────┐   ┌──────────┐
-    │ 数据库   │   │ MinIO    │   │ 数据库   │
-    │ (SQL     │   │ (对象    │   │ (SQL     │
-    │ Alchemy) │   │  存储)   │   │ Alchemy) │
-    └──────────┘   └──────────┘   └──────────┘
-          ↓              ↓              ↓
-    骨架提供：
-    • session.py    • settings.py   • session.py
-      提供           配置             提供
-      数据库连接     MinIO地址        数据库连接
 ```
 
 ---
@@ -806,10 +476,6 @@ FastAPI + Uvicorn = Web 服务框架：
 ├── base.py ─────────┐
 │   ORM 基类         ├──→ 连接 Python 类和数据库表
 └───────────────────┘
-
-├── main.py ─────────┐
-│   应用入口         ├──→ 连接各个路由模块
-└───────────────────┘
 ```
 
 ### 角色 3：基础设施 - 提供基础能力
@@ -823,7 +489,7 @@ FastAPI + Uvicorn = Web 服务框架：
 骨架提供：
 ├── Web 服务能力（FastAPI）
 ├── 并发处理能力（Uvicorn）
-├── 数据持久化能力（SQLAlchemy）
+├── 数据持久化能力（PostgreSQL + SQLAlchemy）
 ├── 配置管理能力（settings）
 └── 依赖注入能力（FastAPI Depends）
 ```
@@ -845,19 +511,24 @@ engine = create_engine(url, future=True)
 # 4. 更明确的错误提示
 ```
 
-### 2. 依赖注入模式
+### 2. UUID 原生支持
 
 ```python
-# FastAPI 的依赖注入系统
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
-# 自动管理资源生命周期
-# 无需手动关闭连接
+class Project(Base):
+    __tablename__ = "projects"
+
+    # PostgreSQL 原生 UUID 类型
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(200), nullable=False)
+
+# 优势：
+# ✓ 自动生成 UUID
+# ✓ 占用空间小（16 字节）
+# ✓ 索引性能好
+# ✓ 全局唯一性
 ```
 
 ### 3. 配置管理单例模式
@@ -871,120 +542,6 @@ def get_settings() -> Settings:
 # 节省内存，保证一致性
 ```
 
-### 4. 模块化路由设计
-
-```python
-# 按功能模块组织路由
-app.include_router(projects.router, prefix="/api/v1/projects")
-app.include_router(assets.router, prefix="/api/v1/assets")
-app.include_router(analysis.router, prefix="/api/v1/analysis")
-
-# 便于维护和扩展
-```
-
----
-
-## 最佳实践
-
-### 1. 使用环境变量管理配置
-
-```bash
-# .env 文件
-BDC_DATABASE_URL=postgresql://user:pass@localhost:5432/db
-BDC_MINIO_ENDPOINT=localhost:9000
-```
-
-### 2. 使用依赖注入获取数据库会话
-
-```python
-# ✓ 推荐
-def create_item(item: Item, db: Session = Depends(get_db)):
-    db.add(item)
-    db.commit()
-
-# ✗ 不推荐
-def create_item(item: Item):
-    db = SessionLocal()
-    db.add(item)
-    db.commit()
-    db.close()
-```
-
-### 3. 使用异步处理 IO 密集型操作
-
-```python
-# ✓ 推荐（异步）
-@router.get("/")
-async def list_items(db: Session = Depends(get_db)):
-    items = db.query(Item).all()
-    return items
-
-# ✗ 不推荐（同步，阻塞）
-@router.get("/")
-def list_items(db: Session = Depends(get_db)):
-    items = db.query(Item).all()
-    return items
-```
-
----
-
-## 常见问题
-
-### Q1: 为什么需要 SQLAlchemy，不能直接写 SQL？
-
-**A**：
-- ✅ SQLAlchemy 提供类型安全
-- ✅ 自动处理连接池
-- ✅ 防止 SQL 注入
-- ✅ 支持多种数据库
-- ✅ 代码更易维护
-
-### Q2: Engine 和 Session 的区别？
-
-**A**：
-```
-Engine = 连接池管理器
-├── 启动时创建
-├── 全局唯一
-└── 管理多个连接
-
-Session = 单个数据库会话
-├── 每次请求创建
-├── 从连接池获取连接
-└── 用完后归还
-```
-
-### Q3: 什么时候用 Depends？
-
-**A**：
-```
-使用 Depends 的场景：
-✓ 需要数据库会话
-✓ 需要认证信息
-✓ 需要共享逻辑
-✓ 需要自动管理资源
-
-不需要 Depends 的场景：
-✗ 简单的参数验证
-✗ 不需要共享的逻辑
-```
-
----
-
-## 总结
-
-Backend 骨架是整个项目的**基础设施**，提供：
-
-| 能力 | 实现方式 |
-|------|----------|
-| Web 服务 | FastAPI + Uvicorn |
-| 数据库访问 | SQLAlchemy + Session |
-| 配置管理 | Settings + 环境变量 |
-| 依赖注入 | FastAPI Depends |
-| 模块化设计 | Router 系统 |
-
-**简单说**：这个骨架让"什么都不行"的空项目，变成了"随时可以开始做功能"的平台！
-
 ---
 
 # 多模态数据处理详解
@@ -995,24 +552,23 @@ Backend 骨架是整个项目的**基础设施**，提供：
 
 **核心价值**：
 - ✅ 图片文字识别（OCR）：提取设备铭牌、仪表读数等关键信息
-- ✅ 文档解析处理：从 PDF 中提取表格、文本、图片
+- ✅ 场景问题分析（GLM-4V）：智能诊断现场问题，给出建议措施
+- ✅ 智能图片路由：根据内容自动选择处理方式
 - ✅ 结构化数据存储：将非结构化数据转为可查询的结构化数据
 - ✅ 多版本管理：保留解析历史，支持追溯和对比
 
 **通俗理解**：
 ```
-多模态数据处理器 = 超级翻译官
+多模态数据处理器 = 超级翻译官 + 智能分析师
 
 输入：各种"看不懂"的东西
 ├── 图片（设备铭牌、现场照片）
-├── PDF 文档（说明书、图纸）
-└── 扫描件（合同、报表）
+└── 备注（工程师说明）
 
-输出：机器能"读懂"的数据
-├── 文字内容（"7032 kW"、"2013/07"）
-├── 位置坐标（文字在哪里）
-├── 置信度（识别的可信程度）
-└── 结构化 JSON（存数据库）
+输出：
+├── OCR 处理（电表、铭牌）→ 文字内容 + 位置坐标
+├── GLM 分析（现场问题）→ 问题诊断 + 建议措施
+└── 结构化 JSON → 存数据库
 ```
 
 ---
@@ -1024,8 +580,13 @@ Backend 骨架是整个项目的**基础设施**，提供：
 ```
 services/backend/
 └── app/
+    ├── api/v1/
+    │   └── assets.py              # API 接口
     └── services/
-        └── image_pipeline.py      # 图片 OCR 处理流水线
+        └── image_pipeline.py      # 图片处理流水线（智能路由）
+
+services/worker/
+└── scene_issue_glm_worker.py     # GLM Worker（后台处理）
 
 shared/
 └── db/
@@ -1036,22 +597,27 @@ shared/
 
 | 组件 | 文件 | 职责 | 类比 |
 |------|------|------|------|
-| OCR 流水线 | image_pipeline.py | 图片文字识别 | 翻译官 |
-| 数据模型 | models_asset.py | 存储识别结果 | 档案柜 |
+| 智能路由 | image_pipeline.py | 根据内容选择处理方式 | 智能分拣员 |
+| OCR 引擎 | PaddleOCR | 图片文字识别 | 翻译官 |
+| GLM 引擎 | GLM-4V API | 场景问题智能分析 | 专家顾问 |
+| Worker | scene_issue_glm_worker.py | 后台自动处理 | 自动化流水线 |
+| 数据模型 | models_asset.py | 存储分析结果 | 档案柜 |
 | API 接口 | assets.py | 接收上传、返回结果 | 服务窗口 |
 
 ---
 
 ## 依赖库详解
 
-### requirements.txt（新增部分）
+### requirements.txt（多模态部分）
 
 ```txt
 # OCR 与图像处理
 paddleocr==2.7.0.3          # 百度 OCR 引擎
 paddlepaddle==2.6.2         # 深度学习框架后端
-pymupdf==1.26.7             # PDF 文档解析
 opencv-python<=4.6.0.66     # 图像处理库
+
+# GLM API
+openai                      # GLM API 客户端（兼容 OpenAI SDK）
 ```
 
 ### 1. PaddleOCR - 文字识别引擎
@@ -1068,15 +634,6 @@ PaddleOCR 的工作过程：
 └── 结果输出：文字 + 坐标 + 置信度
 ```
 
-**为什么选择 PaddleOCR？**
-
-| OCR 方案 | 中文精度 | 速度 | 成本 | 推荐场景 |
-|---------|---------|------|------|----------|
-| **PaddleOCR** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 免费 | 中英混合、工业场景 |
-| Tesseract | ⭐⭐ | ⭐⭐ | 免费 | 纯英文、简单场景 |
-| Azure OCR | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | 按次付费 | 高预算、低频使用 |
-| Google Vision | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | 按次付费 | 海外项目 |
-
 **代码示例**：
 
 ```python
@@ -1089,17 +646,17 @@ ocr = PaddleOCR(
 )
 
 # 识别图片
-result = ocr.ocr('chiller_nameplate.jpg', cls=True)
+result = ocr.ocr('electric_meter.jpg', cls=True)
 
 # 返回结果格式：
 # [
 #   [
 #     [[x1, y1], [x2, y2], [x3, y3], [x4, y4]],  # 文字框坐标
-#     ('冷水机组', 0.998)                            # (文字, 置信度)
+#     ('1234.5', 0.998)                           # (文字, 置信度)
 #   ],
 #   [
 #     [[x1, y1], [x2, y2], [x3, y3], [x4, y4]],
-#     ('7032', 0.996)
+#     ('kW·h', 0.996)
 #   ],
 #   # ... 更多文字行
 # ]
@@ -1111,96 +668,100 @@ result = ocr.ocr('chiller_nameplate.jpg', cls=True)
 - 文字识别：~3.3 秒
 - **总耗时**：约 4.2 秒/张
 
-### 2. PaddlePaddle - 深度学习框架
+### 2. GLM-4V - 视觉大模型
 
-**作用**：PaddleOCR 的"发动机"
+**作用**：理解图片内容，进行场景问题分析
 
-**通俗理解**：就像**汽车的发动机**
-
-```
-PaddlePaddle 提供：
-├── 模型加载：加载训练好的 OCR 模型
-├── 推理引擎：运行神经网络计算
-├── GPU 加速：支持显卡加速（可选）
-└── 内存管理：优化计算资源使用
-
-类比：
-PaddleOCR = 汽车（用户看到的部分）
-PaddlePaddle = 发动机（核心动力）
-没有发动机，汽车动不了
-```
-
-**版本兼容性**（重要！）：
-
-```python
-# ✓ 推荐组合（稳定）
-paddlepaddle==2.6.2
-paddleocr==2.7.0.3
-
-# ✗ 问题组合（不兼容）
-paddlepaddle==3.3.0
-paddleocr==2.7.0.3
-# 会报错：NotImplementedError: ConvertPirAttribute2RuntimeAttribute
-
-# ✗ 不推荐
-python 3.12 + 任意版本
-# Python 3.12 对 PaddleOCR 支持较差
-```
-
-**版本兼容矩阵**：
-
-| Python | PaddlePaddle | PaddleOCR | 状态 |
-|--------|--------------|-----------|------|
-| 3.11 | 2.6.2 | 2.7.0.3 | ✅ 推荐配置 |
-| 3.11 | 3.3.0 | 2.7.0.3 | ❌ 不兼容 |
-| 3.12 | 任意 | 2.7.0.3 | ❌ 不推荐 |
-
-### 3. PyMuPDF - PDF 文档解析
-
-**作用**：从 PDF 中提取文本、图片、表格
-
-**通俗理解**：就像**拆书工具**
+**通俗理解**：就像**资深工程师专家**
 
 ```
-PyMuPDF 的工作过程：
-├── 打开 PDF：像打开一本书
-├── 逐页处理：一页一页翻
-├── 提取内容：
-│   ├── 文本：提取文字内容
-│   ├── 图片：提取嵌入的图片
-│   ├── 表格：识别表格结构
-│   └── 元数据：作者、标题、创建时间
-└── 结构化输出：转为机器可读格式
+GLM-4V 的工作过程：
+├── 理解图片：看到现场照片（像工程师看现场）
+├── 分析问题：识别异常情况（像专家诊断）
+├── 推断原因：分析可能原因（像经验判断）
+└── 给出建议：提供改进措施（像专家建议）
 ```
 
 **代码示例**：
 
 ```python
-import pymupdf  # PyMuPDF
+from openai import OpenAI
 
-# 打开 PDF 文档
-doc = pymupdf.open("chiller_manual.pdf")
+# 初始化 GLM 客户端（使用 OpenAI SDK 兼容接口）
+client = OpenAI(
+    api_key="your_glm_api_key",
+    base_url="https://open.bigmodel.cn/api/paas/v4/"
+)
 
-# 提取文本
-for page_num, page in enumerate(doc):
-    text = page.get_text()
-    print(f"第 {page_num + 1} 页文本：\n{text}\n")
+# 调用 GLM-4V
+response = client.chat.completions.create(
+    model="glm-4v",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,..."
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "分析这张现场照片，识别问题并给出建议"
+                }
+            ]
+        }
+    ],
+    response_format={"type": "json_object"},
+    temperature=0.1
+)
 
-# 提取图片
-for page_num, page in enumerate(doc):
-    image_list = page.get_images()
-    for img_index, img in enumerate(image_list):
-        xref = img[0]
-        base_image = doc.extract_image(xref)
-        image_bytes = base_image["image"]
-        with open(f"page{page_num}_img{img_index}.png", "wb") as f:
-            f.write(image_bytes)
+result = response.choices[0].message.content
+```
 
-# 获取文档元数据
-metadata = doc.metadata
-print(f"作者: {metadata['author']}")
-print(f"标题: {metadata['title']}")
-print(f"创建时间: {metadata['creationDate']}")
+**返回结果示例**：
+
+```json
+{
+  "title": "制冷系统效率低下",
+  "issue_category": "冷源效率",
+  "severity": "high",
+  "summary": "冷却塔水位过高，导致换热效率下降",
+  "suspected_causes": [
+    "水位控制器故障",
+    "水位传感器失灵"
+  ],
+  "recommended_actions": [
+    "更换水位控制器",
+    "校准水位传感器"
+  ],
+  "confidence": 0.8,
+  "tags": ["冷却塔", "水位", "效率低下"]
+}
+```
+
+**性能指标**：
+- API 响应时间：~10-30 秒
+- 准确率：高（大模型能力）
+- 成本：按次计费
+
+### 3. OpenAI SDK - GLM API 客户端
+
+**作用**：Python 与 GLM API 之间的桥梁
+
+**通俗理解**：就像**电话**
+
+```
+OpenAI SDK 提供：
+├── API 调用封装：简化 HTTP 请求
+├── 数据类型转换：Python 对象 ↔ JSON
+├── 错误处理：网络异常、API 错误
+└── 流式响应：支持逐字输出（可选）
+
+类比：
+我们（Python 程序）→ OpenAI SDK → GLM API
+     说中文            打电话          听中文
 ```
 
 ---
@@ -1212,18 +773,21 @@ print(f"创建时间: {metadata['creationDate']}")
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     用户上传图片                              │
-│              选择设备铭牌照片 → 点击上传                       │
+│           选择电表照片 + 备注"电表读数" → 点击上传             │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓ 1. 文件上传
 ┌──────────────────────────────────────────────────────────────┐
-│              API: POST /api/v1/assets/upload                │
+│        API: POST /api/v1/assets/upload_image_with_note       │
 │  工作：接收文件，保存到本地存储，创建 Asset 记录              │
 │  结果：返回 asset_id                                         │
 └──────────────────────┬──────────────────────────────────────┘
-                       ↓ 2. 触发 OCR
+                       ↓ 2. 自动路由
 ┌──────────────────────────────────────────────────────────────┐
-│           API: POST /api/v1/assets/{id}/parse_image         │
-│  工作：读取文件路径，调用 OCR 流水线                         │
+│              route_image_asset() 函数                        │
+│  判断 content_role：                                          │
+│  • "meter" → OCR 文字提取                                     │
+│  • "scene_issue" → GLM-4V 场景问题分析（不自动调用，需 Worker）│
+│  • 其他 → 仅存储                                              │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓ 3. OCR 处理
 ┌──────────────────────────────────────────────────────────────┐
@@ -1241,11 +805,11 @@ print(f"创建时间: {metadata['creationDate']}")
 │  {                                                          │
 │    "annotations": {                                         │
 │      "ocr_lines": [                                         │
-│        {"text": "冷水机组", "bbox": [...], "confidence": 0.998},│
-│        {"text": "7032 kW", "bbox": [...], "confidence": 0.996} │
+│        {"text": "1234.5", "bbox": [...], "confidence": 0.998},│
+│        {"text": "kW·h", "bbox": [...], "confidence": 0.996}  │
 │      ]                                                      │
 │    },                                                       │
-│    "stats": {"avg_confidence": 0.967, "engine": "paddleocr"} │
+│    "stats": {"avg_confidence": 0.997, "engine": "paddleocr"} │
 │  }                                                          │
 └──────────────────────┬──────────────────────────────────────┘
                        ↓ 5. 保存到数据库
@@ -1272,33 +836,131 @@ print(f"创建时间: {metadata['creationDate']}")
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### 时间线
+---
+
+## GLM-4V 场景问题分析流程
+
+### Worker 后台自动处理流程
 
 ```
-T0: 用户选择图片，点击上传
-T1: 前端发送 POST /api/v1/assets/upload
-T2: 后端保存文件，返回 asset_id
-T3: 前端发送 POST /api/v1/assets/{id}/parse_image
-T4: 后端调用 PaddleOCR.ocr()
-T5: 文字检测完成（0.6秒）
-T6: 文字分类完成（0.25秒）
-T7: 文字识别完成（3.3秒）
-T8: 构造 JSON，保存到数据库
-T9: 更新 Asset 状态
-T10: 返回结果给前端
+┌─────────────────────────────────────────────────────────────┐
+│                  GLM Worker 启动（后台进程）                  │
+│            python scene_issue_glm_worker.py                 │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 每 60 秒轮询一次
+┌──────────────────────────────────────────────────────────────┐
+│              查询待处理的 scene_issue 图片                    │
+│  GET /api/v1/assets?modality=image&content_role=scene_issue  │
+│  筛选条件：status IS NULL 或 status = "pending_scene_llm"    │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 找到待处理图片
+┌──────────────────────────────────────────────────────────────┐
+│                  读取图片和备注信息                            │
+│  1. 获取 Asset 详情（file_path, description）                │
+│  2. 从本地存储读取图片文件                                   │
+│  3. 转换为 Base64 编码                                       │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 构造 Prompt
+┌──────────────────────────────────────────────────────────────┐
+│                  构建 GLM-4V 分析 Prompt                      │
+│  Prompt: "你是建筑节能诊断工程师...                          │
+│           分析这张现场照片，识别问题、原因、建议..."           │
+│  备注："管道接口处有渗漏"                                    │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 调用 GLM API
+┌──────────────────────────────────────────────────────────────┐
+│              调用 GLM-4V API（10-30秒）                       │
+│  • 发送图片（Base64）+ Prompt                                │
+│  • 等待 GLM 分析                                            │
+│  • 接收 JSON 结果                                           │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 结果处理
+┌──────────────────────────────────────────────────────────────┐
+│              规范化分析结果                                   │
+│  • 确保 JSON 格式正确                                       │
+│  • 补充默认值（如空列表）                                    │
+│  • 数据类型转换（字符串 → 列表）                             │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 提交结果
+┌──────────────────────────────────────────────────────────────┐
+│      POST /api/v1/assets/{asset_id}/scene_issue_report       │
+│  提交分析结果到后端 API                                       │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 更新状态
+┌──────────────────────────────────────────────────────────────┐
+│              更新 Asset.status = "parsed_scene_llm"         │
+└──────────────────────┬──────────────────────────────────────┘
+                       ↓ 继续轮询
+┌──────────────────────────────────────────────────────────────┐
+│                  等待 60 秒，继续下一轮轮询                     │
+└──────────────────────────────────────────────────────────────┘
+```
 
-总耗时：约 4.2 秒 + 网络传输时间
+### Worker 配置
+
+**环境变量**：
+
+```bash
+# .env 文件
+GLM_API_KEY=your_glm_api_key_here
+GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+GLM_VISION_MODEL=glm-4v
+BDC_BACKEND_BASE_URL=http://localhost:8000
+BDC_LOCAL_STORAGE_DIR=data/assets
+BDC_SCENE_WORKER_POLL_INTERVAL=60  # 轮询间隔（秒）
+```
+
+**轮询逻辑**：
+
+```python
+import time
+from openai import OpenAI
+
+client = OpenAI(api_key=GLM_API_KEY, base_url=GLM_BASE_URL)
+
+def main():
+    print("Starting GLM-4V scene_issue worker...")
+
+    while True:
+        # 1. 查询待处理图片
+        assets = get_pending_scene_assets()
+
+        if not assets:
+            print("No pending assets found")
+        else:
+            # 2. 处理每个待处理图片
+            for asset in assets:
+                print(f"Processing asset {asset['id']}...")
+
+                # 3. 读取图片
+                image_content = get_image_content(asset)
+                if not image_content:
+                    continue
+
+                # 4. 调用 GLM-4V
+                result = call_glm_vision(image_content, asset['description'])
+                if not result:
+                    continue
+
+                # 5. 提交结果
+                post_scene_issue_report(asset['id'], result)
+
+        # 6. 等待下一轮
+        time.sleep(POLL_INTERVAL)
+
+if __name__ == "__main__":
+    main()
 ```
 
 ---
 
 ## 代码层面解析
 
-### 1. image_pipeline.py - OCR 流水线
+### 1. image_pipeline.py - 智能路由
 
 **位置**：`services/backend/app/services/image_pipeline.py`
 
-**核心代码**：
+**核心功能**：
 
 ```python
 from paddleocr import PaddleOCR
@@ -1307,387 +969,262 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 单例模式：全局只创建一个 OCR 实例
-# 为什么？因为加载模型很慢（约2-3秒），重复创建浪费资源
 _ocr_client = None
 
 def _get_ocr_client():
-    """
-    获取 OCR 客户端（单例模式）
-
-    就像借书：
-    • 第一次来：注册办卡，给你一本书（创建实例）
-    • 之后来：直接借书（返回缓存的实例）
-
-    好处：
-    • 省时间：不用每次都创建（约2-3秒）
-    • 省内存：全局只有一个实例
-    """
+    """获取 OCR 客户端（单例模式）"""
     global _ocr_client
 
     if _ocr_client is None:
         logger.info("初始化 PaddleOCR 客户端...")
-        try:
-            _ocr_client = PaddleOCR(
-                use_angle_cls=True,    # 启用文字方向分类
-                lang='ch',              # 中文模型
-                show_log=False,         # 关闭详细日志
-            )
-            logger.info("PaddleOCR 客户端初始化成功")
-        except Exception as e:
-            logger.error(f"PaddleOCR 初始化失败: {e}")
-            raise RuntimeError(
-                "PaddleOCR is not installed. "
-                "Please install 'paddleocr' and its dependencies."
-            )
+        _ocr_client = PaddleOCR(
+            use_angle_cls=True,
+            lang='ch',
+            show_log=False,
+        )
+        logger.info("PaddleOCR 客户端初始化成功")
 
     return _ocr_client
 
 
-def _run_paddle_ocr(image_path: str) -> List[Dict]:
+def route_image_asset(db: Session, asset_id: UUID) -> Asset:
     """
-    运行 PaddleOCR 识别图片
+    智能图片路由：根据 content_role 自动选择处理方式
 
-    Args:
-        image_path: 图片文件路径
-
-    Returns:
-        List[OcrLine]: OCR 识别结果列表
-        [
-            {
-                "text": "冷水机组",
-                "bbox": [[x1,y1], [x2,y2], [x3,y3], [x4,y4]],
-                "confidence": 0.998
-            },
-            ...
-        ]
+    处理流程：
+    1. 查询 Asset 记录
+    2. 检查 modality 和 content_role
+    3. 根据类型选择处理：
+       - meter → OCR 文字提取
+       - scene_issue → 更新状态为 pending_scene_llm
+       - 其他 → 仅存储
+    4. 更新 Asset 状态
     """
-    ocr = _get_ocr_client()
-
-    # 执行 OCR
-    # cls=True: 启用文字方向分类
-    result = ocr.ocr(image_path, cls=True)
-
-    # PaddleOCR 返回格式：
-    # result[0] = 第一页的识别结果（列表）
-    # 每个元素是 [bbox, (text, confidence)]
-    if not result or not result[0]:
-        return []
-
-    ocr_lines = []
-    for line in result[0]:
-        bbox, (text, confidence) = line
-
-        ocr_lines.append({
-            "text": text,
-            "bbox": bbox,  # 四个坐标点：左上、右上、右下、左下
-            "confidence": float(confidence)
-        })
-
-    return ocr_lines
-
-
-def process_image_with_ocr(db: Session, asset_id: UUID) -> AssetStructuredPayload:
-    """
-    处理图片 OCR 的完整流程
-
-    就像工厂流水线：
-    1. 取原料（读取 Asset 记录）
-    2. 加工（调用 OCR 识别）
-    3. 质检（计算平均置信度）
-    4. 打包（构造 JSON）
-    5. 入库（保存到数据库）
-    6. 贴标签（更新 Asset 状态）
-    """
-    # 步骤 1: 查询 Asset 记录
     asset = db.query(Asset).filter(Asset.id == asset_id).one()
-    file_blob = db.query(FileBlob).filter(FileBlob.id == asset.file_id).one()
 
-    # 步骤 2: 获取图片绝对路径
-    # file_blob.path 是相对路径，需要拼接完整路径
-    from shared.config.settings import get_settings
-    settings = get_settings()
-    abs_path = str(settings.local_storage_dir / file_blob.path)
+    if asset.modality != "image":
+        raise ValueError(f"不支持的模态类型: {asset.modality}")
 
-    logger.info(f"开始 OCR 处理: {abs_path}")
+    role = (asset.content_role or "").lower()
 
-    # 步骤 3: 执行 OCR 识别
-    ocr_lines = _run_paddle_ocr(abs_path)
+    # 路由逻辑
+    if role == "meter":
+        # 电表、铭牌 → OCR 文字提取
+        logger.info(f"Asset {asset_id}: 路由到 OCR 处理")
+        structured = process_image_with_ocr(db, asset_id)
 
-    # 步骤 4: 计算统计信息
-    if ocr_lines:
-        total_conf = sum(line['confidence'] for line in ocr_lines)
-        avg_conf = total_conf / len(ocr_lines)
+    elif role == "scene_issue":
+        # 场景问题 → 更新状态，等待 GLM Worker 处理
+        logger.info(f"Asset {asset_id}: 路由到 GLM-4V 处理")
+        asset.status = "pending_scene_llm"
+        db.commit()
+        db.refresh(asset)
+
     else:
-        avg_conf = 0.0
+        # 其他类型 → 仅存储
+        logger.info(f"Asset {asset_id}: 仅存储，不自动处理")
+        asset.status = "uploaded"
+        db.commit()
+        db.refresh(asset)
 
-    logger.info(f"OCR 识别完成: {len(ocr_lines)} 行, 平均置信度: {avg_conf:.3f}")
+    return asset
+```
 
-    # 步骤 5: 构造结构化数据
-    payload_data = {
-        "image_meta": {
-            "path": file_blob.path,
-            "file_name": file_blob.file_name
-        },
-        "annotations": {
-            "ocr_lines": ocr_lines,
-            "global_tags": []  # 预留：未来可以添加全局标签
-        },
-        "derived_text": "\n".join(line['text'] for line in ocr_lines),
-        "stats": {
-            "avg_confidence": avg_conf,
-            "engine": "paddleocr"
-        }
+### 2. scene_issue_glm_worker.py - GLM Worker
+
+**位置**：`services/worker/scene_issue_glm_worker.py`
+
+**核心功能**：
+
+```python
+import time
+import base64
+import io
+from pathlib import Path
+from PIL import Image
+from openai import OpenAI
+import requests
+
+# 环境变量配置
+BACKEND_BASE_URL = os.getenv("BDC_BACKEND_BASE_URL", "http://127.0.0.1:8000")
+LOCAL_STORAGE_DIR = os.getenv("BDC_LOCAL_STORAGE_DIR", "./data/local_storage")
+GLM_API_KEY = os.getenv("GLM_API_KEY", "")
+GLM_BASE_URL = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/")
+VISION_MODEL = os.getenv("GLM_VISION_MODEL", "glm-4v")
+POLL_INTERVAL = int(os.getenv("BDC_SCENE_WORKER_POLL_INTERVAL", "60"))
+
+# 初始化 GLM 客户端
+client = OpenAI(api_key=GLM_API_KEY, base_url=GLM_BASE_URL)
+
+
+def get_pending_scene_assets():
+    """从后端获取待处理的 scene_issue 图片"""
+    params = {
+        "modality": "image",
+        "content_role": "scene_issue",
     }
 
-    # 步骤 6: 创建 AssetStructuredPayload 记录
-    structured = AssetStructuredPayload(
-        asset_id=asset_id,
-        schema_type="image_annotation",  # Schema 类型：图片标注
-        version=1.0,                      # 版本号
-        payload=payload_data,
-        created_by="paddleocr"
+    resp = requests.get(
+        f"{BACKEND_BASE_URL}/api/v1/assets",
+        params=params,
+        timeout=30
     )
-    db.add(structured)
 
-    # 步骤 7: 更新 Asset 状态
-    if avg_conf >= 0.8:
-        asset.status = "parsed_ocr_ok"
-    else:
-        asset.status = "parsed_ocr_low_conf"
+    if resp.status_code != 200:
+        return []
 
-    # 步骤 8: 提交事务
-    db.commit()
-    db.refresh(structured)
+    assets = resp.json()
+    # 筛选待处理的图片
+    pending = [a for a in assets if a.get("status") in (None, "pending_scene_llm")]
+    return pending
 
-    logger.info(f"OCR 结果已保存: {structured.id}")
 
-    return structured
-```
+def get_image_content_from_detail(detail: dict):
+    """从 Asset 详情获取图片内容（Base64 编码）"""
+    file_path = detail.get("file_path")
+    if not file_path:
+        return None
 
-**关键设计点**：
+    full_path = Path(LOCAL_STORAGE_DIR) / file_path
+    if not full_path.is_file():
+        return None
 
-```python
-# 1. 单例模式（_ocr_client）
-#    好处：避免重复加载模型（节省 2-3 秒初始化时间）
+    # 读取图片并转换
+    try:
+        with Image.open(full_path) as img:
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
 
-# 2. 结构化数据设计
-payload_data = {
-    "image_meta": {...},      # 原始图片信息
-    "annotations": {...},     # OCR 识别结果
-    "derived_text": "...",    # 拼接的纯文本（方便搜索）
-    "stats": {...}            # 统计信息
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+
+            return {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{img_str}"
+                }
+            }
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return None
+
+
+def call_glm_vision(image_content: dict, note: str = None):
+    """调用 GLM-4V API 进行场景问题分析"""
+    prompt = """
+你是一名建筑节能与运行诊断工程师助手。
+请结合现场照片分析现场问题或运行状态。
+
+严格按照下列 JSON 结构输出：
+{
+  "title": "一句话的简短标题",
+  "issue_category": "问题类别",
+  "severity": "low | medium | high",
+  "summary": "对现场主要问题或状态的简要描述",
+  "suspected_causes": ["可能原因1", "可能原因2"],
+  "recommended_actions": ["建议措施1", "建议措施2"],
+  "confidence": 0.0 到 1.0 之间的数字,
+  "tags": ["若干短标签"]
 }
+"""
 
-# 3. 多版本管理
-#    每次解析创建新的 AssetStructuredPayload 记录
-#    保留所有历史版本，通过 created_at 排序获取最新版
+    if note:
+        prompt += f"\n\n工程师备注：{note}"
 
-# 4. 状态管理
-#    根据 avg_confidence 决定状态：
-#    • >= 0.8: parsed_ocr_ok（质量好）
-#    • < 0.8: parsed_ocr_low_conf（质量差，需人工复核）
-```
-
-### 2. assets.py - API 接口
-
-**位置**：`services/backend/app/api/v1/assets.py`
-
-**核心代码**：
-
-```python
-from fastapi import APIRouter, Depends, UploadFile, File
-from sqlalchemy.orm import Session
-from shared.db.session import get_db
-from app.services.image_pipeline import process_image_with_ocr
-
-router = APIRouter()
-
-
-@router.post("/upload")
-async def upload_asset(
-    project_id: str,           # 从 URL 参数获取
-    modality: str,             # 模态类型：image / document / table
-    source: str,               # 来源：mobile / web / api
-    file: UploadFile = File(...),  # 上传的文件
-    db: Session = Depends(get_db)
-):
-    """
-    上传 Asset 文件
-
-    流程：
-    1. 验证项目是否存在
-    2. 保存文件到本地存储
-    3. 创建 FileBlob 记录
-    4. 创建 Asset 记录
-    5. 返回 Asset 信息
-    """
-    # 步骤 1: 查询项目
-    project = db.query(Project).filter(
-        Project.id == uuid.UUID(project_id)
-    ).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
-
-    # 步骤 2: 生成唯一文件名（UUID + 原扩展名）
-    ext = Path(file.filename).suffix
-    unique_filename = f"{uuid.uuid4()}{ext}"
-
-    # 步骤 3: 构造存储路径
-    # 路径格式：data/assets/{project_id}/{uuid}.jpg
-    settings = get_settings()
-    rel_path = f"{project_id}/{unique_filename}"
-    full_path = settings.local_storage_dir / rel_path
-
-    # 确保目录存在
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # 步骤 4: 保存文件
-    with open(full_path, "wb") as f:
-        content = await file.read()  # 异步读取文件内容
-        f.write(content)
-
-    logger.info(f"文件已保存: {full_path}")
-
-    # 步骤 5: 创建 FileBlob 记录
-    file_blob = FileBlob(
-        storage_type="local",
-        bucket="assets",
-        path=rel_path,
-        file_name=file.filename,
-        content_type=file.content_type,
-        size=len(content)
-    )
-    db.add(file_blob)
-    db.flush()  # 获取 file_blob.id
-
-    # 步骤 6: 创建 Asset 记录
-    asset = Asset(
-        project_id=project.id,
-        file_id=file_blob.id,
-        modality=modality,
-        source=source,
-        status="uploaded"  # 初始状态：已上传
-    )
-    db.add(asset)
-    db.commit()
-    db.refresh(asset)
-
-    return asset
-
-
-@router.post("/{asset_id}/parse_image")
-async def parse_image_asset(
-    asset_id: UUID,  # FastAPI 自动转换字符串为 UUID
-    db: Session = Depends(get_db)
-):
-    """
-    触发图片 OCR 解析
-
-    流程：
-    1. 查询 Asset 记录
-    2. 调用 OCR 流水线
-    3. 返回解析后的 Asset
-    """
-    # 查询 Asset
-    asset = db.query(Asset).filter(Asset.id == asset_id).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset 不存在")
-
-    # 检查模态类型
-    if asset.modality != "image":
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的模态类型: {asset.modality}"
+    try:
+        response = client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        image_content,
+                        {"type": "text", "text": prompt}
+                    ]
+                }
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1
         )
 
-    # 调用 OCR 处理
-    structured: AssetStructuredPayload = process_image_with_ocr(db, asset_id)
+        content = response.choices[0].message.content
+        return json.loads(content)
 
-    # 刷新 Asset 获取最新状态
-    db.refresh(asset)
+    except Exception as e:
+        print(f"GLM API Error: {e}")
+        return None
 
-    return asset
-```
 
-**工作流程**：
+def post_scene_issue_report(asset_id: str, payload: dict):
+    """提交场景问题报告到后端 API"""
+    url = f"{BACKEND_BASE_URL}/api/v1/assets/{asset_id}/scene_issue_report"
 
-```
-上传图片流程：
-┌─────────────┐
-│ 用户选择文件 │
-└──────┬──────┘
-       ↓
-┌─────────────────────────┐
-│ POST /assets/upload     │
-│ • project_id: uuid      │
-│ • modality: "image"     │
-│ • source: "mobile"      │
-│ • file: <binary>        │
-└──────┬──────────────────┘
-       ↓
-┌─────────────────────────┐
-│ 服务器保存文件          │
-│ • 生成唯一文件名        │
-│ • 保存到 data/assets/   │
-│ • 创建 FileBlob 记录    │
-│ • 创建 Asset 记录       │
-└──────┬──────────────────┘
-       ↓
-┌─────────────────────────┐
-│ 返回 Asset 信息         │
-│ {                       │
-│   "id": "asset-uuid",   │
-│   "status": "uploaded"  │
-│ }                       │
-└─────────────────────────┘
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        if resp.status_code in (200, 201):
+            print(f"[OK] Reported scene_issue for asset {asset_id}")
+            return True
+        else:
+            print(f"[WARN] Failed: HTTP {resp.status_code}")
+            return False
+    except Exception as e:
+        print(f"[ERROR] Exception: {e}")
+        return False
 
-OCR 解析流程：
-┌──────────────┐
-│ 用户点击"识别"│
-└──────┬───────┘
-       ↓
-┌────────────────────────────┐
-│ POST /assets/{id}/parse    │
-└──────┬─────────────────────┘
-       ↓
-┌────────────────────────────┐
-│ 1. 读取 Asset              │
-│ 2. 获取文件路径            │
-│ 3. 调用 PaddleOCR          │
-│ 4. 构造 JSON               │
-│ 5. 保存到数据库            │
-│ 6. 更新状态                │
-└──────┬─────────────────────┘
-       ↓
-┌────────────────────────────┐
-│ 返回结果                   │
-│ {                          │
-│   "status": "parsed_ocr_ok"│
-│   "structured_payloads": []│
-│ }                          │
-└────────────────────────────┘
+
+def main():
+    """主循环"""
+    print("Starting GLM-4V scene_issue worker...")
+    print(f"Backend: {BACKEND_BASE_URL}")
+    print(f"Local storage: {LOCAL_STORAGE_DIR}")
+
+    while True:
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking for pending assets...")
+
+        assets = get_pending_scene_assets()
+        print(f"Found {len(assets)} pending assets")
+
+        for asset in assets:
+            asset_id = asset.get("id")
+            print(f"Processing {asset_id}...")
+
+            # 获取详情
+            resp = requests.get(f"{BACKEND_BASE_URL}/api/v1/assets/{asset_id}")
+            detail = resp.json()
+
+            # 读取图片
+            image_content = get_image_content_from_detail(detail)
+            if not image_content:
+                continue
+
+            # 调用 GLM
+            note = detail.get("description") or ""
+            result = call_glm_vision(image_content, note)
+            if not result:
+                continue
+
+            # 提交结果
+            post_scene_issue_report(asset_id, result)
+
+        # 等待下一轮
+        print(f"Waiting {POLL_INTERVAL} seconds...")
+        time.sleep(POLL_INTERVAL)
+
+
+if __name__ == "__main__":
+    main()
 ```
 
 ---
 
 ## 实际应用场景
 
-### 场景 1：识别冷水机组铭牌
+### 场景 1：识别电表读数
 
-**目标**：从设备铭牌图片中提取关键参数
+**目标**：从电表照片中提取读数
 
-**输入**：设备铭牌照片
-
-```
-┌────────────────────────────────┐
-│  YORK                          │
-│  冷水机组                      │
-│  型号: YKR2R2K45DGG/EE22      │
-│  额定制冷量: 7032 kW           │
-│  制冷剂: R-134a                │
-│  制造日期: 2013/07             │
-└────────────────────────────────┘
-```
+**输入**：电表照片 + 备注"电表读数"
 
 **OCR 识别结果**：
 
@@ -1695,198 +1232,79 @@ OCR 解析流程：
 {
   "annotations": {
     "ocr_lines": [
-      {"text": "YORK", "confidence": 0.984},
-      {"text": "冷水机组", "confidence": 0.998},
-      {"text": "型号: YKR2R2K45DGG/EE22", "confidence": 0.992},
-      {"text": "额定制冷量: 7032 kW", "confidence": 0.996},
-      {"text": "制冷剂: R-134a", "confidence": 0.991},
-      {"text": "制造日期: 2013/07", "confidence": 0.993}
+      {"text": "1234.5", "confidence": 0.998},
+      {"text": "kW·h", "confidence": 0.996}
     ]
   },
   "stats": {
-    "avg_confidence": 0.992,
+    "avg_confidence": 0.997,
     "engine": "paddleocr"
   }
 }
 ```
 
-**后续处理**：
+**后续处理**：可以使用正则表达式或 LLM 提取数值：`1234.5`
 
-```python
-# 第二层解析（未来实现）：从 OCR 文本中提取结构化数据
+### 场景 2：分析现场问题
 
-def extract_chiller_info(ocr_result: dict) -> dict:
-    """
-    从 OCR 结果中提取冷水机组参数
-    """
-    ocr_text = ocr_result["derived_text"]
+**目标**：识别现场问题并给出建议
 
-    # 使用正则表达式或 Claude API 提取关键信息
-    info = {
-        "brand": "YORK",
-        "model": "YKR2R2K45DGG/EE22",
-        "cooling_capacity_kw": 7032,
-        "refrigerant": "R-134a",
-        "manufacture_date": "2013-07"
-    }
+**输入**：管道渗漏照片 + 备注"管道接口处有渗漏"
 
-    return info
-```
+**GLM-4V 分析结果**：
 
-### 场景 2：批量处理现场照片
-
-**目标**：批量上传并自动识别多张现场照片
-
-**实现**：
-
-```python
-# 前端代码（伪代码）
-async function batchUpload(projectId, images) {
-    const results = [];
-
-    for (const image of images) {
-        // 1. 上传图片
-        const asset = await uploadAsset(projectId, image);
-        const assetId = asset.id;
-
-        // 2. 触发 OCR
-        const parsed = await parseImage(assetId);
-
-        results.push({
-            fileName: image.name,
-            assetId: assetId,
-            status: parsed.status,
-            ocrLines: parsed.structured_payloads[0].payload.annotations.ocr_lines
-        });
-    }
-
-    return results;
+```json
+{
+  "title": "管道接口渗漏",
+  "issue_category": "设备维护",
+  "severity": "medium",
+  "summary": "管道接口处出现渗漏，可能影响系统正常运行",
+  "suspected_causes": [
+    "密封垫老化",
+    "接口松动",
+    "压力过大"
+  ],
+  "recommended_actions": [
+    "更换密封垫",
+    "紧固接口",
+    "检查系统压力"
+  ],
+  "confidence": 0.85,
+  "tags": ["管道", "渗漏", "维护"]
 }
-
-// 使用示例
-const images = [
-    'chiller_01.jpg',
-    'chiller_02.jpg',
-    'pump_room.jpg'
-];
-
-const results = await batchUpload(projectId, images);
-
-console.log(`成功处理 ${results.length} 张图片`);
-results.forEach(r => {
-    console.log(`${r.fileName}: 识别 ${r.ocrLines.length} 行文本`);
-});
 ```
 
-### 场景 3：质量检查与人工复核
-
-**目标**：筛选低质量识别结果，提示人工复核
+### 场景 3：批量处理现场照片
 
 **实现**：
 
-```python
-@router.get("/assets/low-confidence")
-def list_low_confidence_assets(db: Session = Depends(get_db)):
-    """
-    查询所有低置信度的 Asset（需要人工复核）
+```bash
+# 1. 上传多张现场问题照片
+for file in issue_*.jpg; do
+    curl -X POST "http://localhost:8000/api/v1/assets/upload_image_with_note" \
+        -F "project_id=$PROJECT_ID" \
+        -F "modality=image" \
+        -F "content_role=scene_issue" \
+        -F "file=@$file" \
+        -F "note=现场问题照片"
+done
 
-    判断标准：
-    1. status = "parsed_ocr_low_conf"
-    2. avg_confidence < 0.8
-    """
-    # 查询所有结构化数据
-    payloads = db.query(AssetStructuredPayload).all()
+# 2. 启动 GLM Worker（会自动处理）
+python services/worker/scene_issue_glm_worker.py
 
-    low_conf_items = []
-    for payload in payloads:
-        stats = payload.payload.get("stats", {})
-        avg_conf = stats.get("avg_confidence", 1.0)
-
-        if avg_conf < 0.8:
-            low_conf_items.append({
-                "asset_id": payload.asset_id,
-                "avg_confidence": avg_conf,
-                "ocr_lines": len(payload.payload["annotations"]["ocr_lines"])
-            })
-
-    return low_conf_items
+# Worker 会：
+# - 每 60 秒轮询一次
+# - 找到待处理的图片
+# - 调用 GLM-4V 分析
+# - 提交结果到后端
+# - 更新状态为 "parsed_scene_llm"
 ```
 
 ---
 
 ## 常见问题与解决
 
-### ❌ 问题 1：numpy ABI 版本不兼容
-
-**错误信息**：
-```
-RuntimeError: module compiled against ABI version 0x1000009
-but this version of numpy is 0x2000000
-```
-
-**原因**：
-- PaddleOCR 依赖的一些扩展包是用 numpy 1.x 编译的
-- numpy 2.0 改变了 ABI（二进制接口）
-- 导致加载扩展时报错
-
-**解决方案**：
-```bash
-# 降级 numpy 到 1.x 版本
-pip install "numpy<2.0"
-
-# 验证
-python -c "import numpy; print(numpy.__version__)"
-# 应该输出：1.26.4 或类似版本
-```
-
-### ❌ 问题 2：PaddlePaddle 版本不匹配
-
-**错误信息**：
-```
-NotImplementedError: ConvertPirAttribute2RuntimeAttribute not support
-```
-
-**原因**：
-- PaddlePaddle 3.3.0 太新，与 PaddleOCR 2.7.0.3 不兼容
-- PaddleOCR 2.7.0.3 是基于 PaddlePaddle 2.6.x 开发的
-
-**解决方案**：
-```bash
-# 卸载现有版本
-pip uninstall paddlepaddle paddlepaddle-gpu
-
-# 安装兼容版本
-pip install paddlepaddle==2.6.2
-
-# 验证
-python -c "import paddle; print(paddle.__version__)"
-# 应该输出：2.6.2
-```
-
-### ❌ 问题 3：PyMuPDF 编译失败（Windows）
-
-**错误信息**：
-```
-FileNotFoundError: mupdf-1.20.3-source/...
-```
-
-**原因**：
-- Windows 路径长度限制（MAX_PATH = 260 字符）
-- 缺少 Visual Studio 编译器
-- 旧版本 PyMuPDF 需要编译
-
-**解决方案**：
-```bash
-# 使用新版本的预编译 wheel
-pip install pymupdf==1.26.7
-
-# 如果还是失败，手动下载 wheel
-# https://pypi.org/project/PyMuPDF/#files
-# 选择：pymupdf-1.26.7-cp311-cp311-win_amd64.whl
-pip install /path/to/pymupdf-1.26.7-cp311-cp311-win_amd64.whl
-```
-
-### ❌ 问题 4：首次运行很慢
+### ❌ 问题 1：PaddleOCR 首次运行慢
 
 **现象**：第一次调用 OCR 时卡住 2-3 分钟
 
@@ -1907,130 +1325,95 @@ C:\Users\<用户名>\.paddleocr\whl\
 - ✅ 后续运行会使用缓存，速度快
 - ✅ 可以提前下载模型到离线环境
 
-### ❌ 问题 5：识别质量差
+### ❌ 问题 2：GLM API 调用失败
 
-**现象**：识别结果不准确，置信度低
+**错误信息**：
+```
+openai.error.AuthenticationError: Incorrect API key provided
+```
 
-**可能原因**：
-1. 图片模糊
-2. 光线太暗或太亮
-3. 文字太小
-4. 拍摄角度倾斜
+**原因**：API Key 配置错误或未配置
 
-**解决方案**：
+**解决**：
+```bash
+# 检查 .env 文件
+cat .env | grep GLM_API_KEY
+
+# 应该输出：
+# GLM_API_KEY=your_actual_api_key_here
+
+# 如果没有配置，添加到 .env：
+echo "GLM_API_KEY=your_glm_api_key_here" >> .env
+```
+
+### ❌ 问题 3：图片文件读取失败
+
+**错误信息**：
+```
+FileNotFoundError: Local image file not found
+```
+
+**原因**：
+- `BDC_LOCAL_STORAGE_DIR` 配置错误
+- 文件路径不匹配
+- 文件未正确保存
+
+**解决**：
 ```python
-# 图像预处理（可以添加到 image_pipeline.py）
+# 检查配置
+from shared.config.settings import get_settings
+settings = get_settings()
+print(f"本地存储目录: {settings.local_storage_dir}")
 
-import cv2
-import numpy as np
-
-def preprocess_image(image_path: str) -> str:
-    """
-    图像预处理：提高 OCR 识别率
-
-    步骤：
-    1. 读取图片
-    2. 调整对比度
-    3. 去噪
-    4. 保存处理后的图片
-    """
-    img = cv2.imread(image_path)
-
-    # 1. 转灰度图
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 2. 自适应阈值（增强文字对比度）
-    binary = cv2.adaptiveThreshold(
-        gray, 255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        11, 2
-    )
-
-    # 3. 去噪
-    denoised = cv2.fastNlMeansDenoising(binary)
-
-    # 4. 保存
-    processed_path = image_path.replace(".jpg", "_processed.jpg")
-    cv2.imwrite(processed_path, denoised)
-
-    return processed_path
-
-# 使用
-processed_path = preprocess_image(abs_path)
-ocr_lines = _run_paddle_ocr(processed_path)
+# 检查文件是否存在
+from pathlib import Path
+file_path = Path(settings.local_storage_dir) / "project_id" / "uuid.jpg"
+print(f"文件存在: {file_path.exists()}")
 ```
 
 ---
 
 ## 最佳实践
 
-### 1. 使用异步处理（推荐）
+### 1. 使用智能路由
 
 ```python
-# ✗ 同步处理（阻塞 API）
-@router.post("/{asset_id}/parse_image")
-def parse_image_asset(asset_id: UUID, db: Session = Depends(get_db)):
-    structured = process_image_with_ocr(db, asset_id)  # 阻塞 4 秒
-    return structured
+# ✓ 推荐：让系统自动选择处理方式
+POST /api/v1/assets/upload_image_with_note
+?content_role=meter
+&auto_route=true
 
-# ✓ 异步处理（不阻塞）
-from fastapi import BackgroundTasks
-
-@router.post("/{asset_id}/parse_image")
-async def parse_image_asset(
-    asset_id: UUID,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
-    # 立即返回，后台处理
-    background_tasks.add_task(process_image_with_ocr, db, asset_id)
-
-    return {
-        "message": "OCR 处理已开始",
-        "asset_id": asset_id,
-        "status": "processing"
-    }
+# 根据 content_role 自动：
+# • meter → OCR
+# • scene_issue → GLM-4V
+# • 其他 → 仅存储
 ```
 
-### 2. 使用版本管理
+### 2. 使用 Worker 后台处理
 
 ```python
-# ✓ 推荐：保留所有版本
-def parse_image_v2(db: Session, asset_id: UUID):
-    # 创建新版本（不删除旧版本）
-    structured_v2 = AssetStructuredPayload(
-        asset_id=asset_id,
-        schema_type="image_annotation",
-        version=2.0,  # 新版本号
-        payload=new_result
-    )
-    db.add(structured_v2)
+# ✓ 推荐：异步处理，不阻塞 API
+# 1. 上传图片（立即返回）
+POST /api/v1/assets/upload_image_with_note
+?content_role=scene_issue
 
-# ✗ 不推荐：覆盖旧版本
-def parse_image_bad(db: Session, asset_id: UUID):
-    old = db.query(AssetStructuredPayload).filter(
-        AssetStructuredPayload.asset_id == asset_id
-    ).first()
-    old.payload = new_result  # 丢失历史数据
+# 2. Worker 后台自动处理
+# （无需手动触发，轮询处理）
 ```
 
-### 3. 添加错误处理
+### 3. 多版本管理
 
 ```python
-# ✓ 推荐：完善的错误处理
-@router.post("/{asset_id}/parse_image")
-async def parse_image_asset(asset_id: UUID, db: Session = Depends(get_db)):
-    try:
-        structured = process_image_with_ocr(db, asset_id)
-        return structured
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail="图片文件不存在")
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail="OCR 服务异常")
-    except Exception as e:
-        logger.exception(f"OCR 处理失败: {e}")
-        raise HTTPException(status_code=500, detail="内部错误")
+# ✓ 推荐：保留所有历史版本
+# 每次重新解析生成新版本
+# 通过 created_at 排序获取最新版
+payloads = db.query(AssetStructuredPayload)\
+    .filter(AssetStructuredPayload.asset_id == asset_id)\
+    .order_by(AssetStructuredPayload.created_at.desc())\
+    .all()
+
+# 最新版本
+latest = payloads[0] if payloads else None
 ```
 
 ---
@@ -2042,23 +1425,26 @@ async def parse_image_asset(asset_id: UUID, db: Session = Depends(get_db)):
 | 能力 | 实现方式 | 性能 |
 |------|----------|------|
 | 图片文字识别 | PaddleOCR 2.7.0.3 | 4.2 秒/张 |
-| PDF 文档解析 | PyMuPDF 1.26.7 | 取决于文档大小 |
-| 结构化存储 | SQLAlchemy + JSON | 自动 |
+| 场景问题分析 | GLM-4V API | 10-30 秒/张 |
+| 智能路由 | content_role 判断 | 自动 |
+| 结构化存储 | PostgreSQL + JSON | 自动 |
 | 版本管理 | AssetStructuredPayload | 自动 |
-| 质量评估 | 置信度计算 | 自动 |
+| 后台处理 | GLM Worker | 60 秒轮询 |
 
-**简单说**：这个模块让"看不懂图片"的计算机，变成了"能读懂文字"的智能助手！
+**简单说**：这个模块让"看不懂图片"的计算机，变成了"能读懂内容 + 分析问题"的智能助手！
 
 ---
 
 ## 相关文档
 
-- [项目规划文档](../PLAN.md)
-- [开源技术栈推荐](../OPEN_SOURCE_RECOMMENDATIONS.md)
+- [项目规划文档](../GUIDEBOOK/PLAN.md)
+- [开源技术栈推荐](../GUIDEBOOK/OPEN_SOURCE_RECOMMENDATIONS.md)
 - [README 主文档](../README.md)
+- [项目进度总结](../PROJECT_PROGRESS_SUMMARY.md)
+- [PostgreSQL 迁移总结](../POSTGRESQL_MIGRATION_SUMMARY.md)
 
 ---
 
-**文档版本**: v2.0
-**最后更新**: 2025-01-18
+**文档版本**: v3.0
+**最后更新**: 2025-01-19
 **维护者**: BDC-AI 开发团队

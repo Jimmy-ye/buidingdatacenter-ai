@@ -58,6 +58,8 @@ class AssetStructuredPayloadRead(BaseModel):
 
 class AssetDetailRead(AssetRead):
     structured_payloads: List[AssetStructuredPayloadRead] = []
+    # Relative file path within local storage, derived from FileBlob.path
+    file_path: Optional[str] = None
 
 
 class SceneIssueReportPayload(BaseModel):
