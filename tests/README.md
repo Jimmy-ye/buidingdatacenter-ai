@@ -1,81 +1,115 @@
-# 测试文档
+# tests 测试数据目录
 
-## 测试目录结构
+本目录用于存放测试数据和样本文件。
+
+## 📁 目录结构
 
 ```
 tests/
-├── integration/          # 集成测试
-│   ├── test_project_creation.py      # 项目创建测试
-│   ├── test_paddleocr_pipeline.py    # PaddleOCR 完整流水线测试
-│   ├── test_paddleocr_standalone.py  # PaddleOCR 独立测试
-│   └── test_full_pipeline.py         # 完整业务流程测试
-├── unit/                 # 单元测试（待添加）
-└── api/                  # API 测试（待添加）
+├── changsha-现场/        # 长沙万象城现场图片测试数据
+├── changsha-表具/        # 长沙万象城表具图片测试数据
+└── README.md            # 本文件
 ```
 
-## 运行测试
+## 📊 测试数据说明
 
-### 运行所有测试
+### changsha-现场（4张）
+现场照片，用于测试 LLM 场景理解功能。
+
+- `IMG_20250706_180220.jpg` - 风机盘管
+- `IMG_20250708_105710.jpg` - 冷却塔
+- `IMG_20250708_110459.jpg` - 冷却塔
+- `IMG_20250710_115616.jpg` - 玻璃幕墙
+
+**项目 ID**: `be0ceec0-27b3-4139-8636-05dd4412c769`
+
+**用途**：测试 GLM-4V 视觉模型的现场问题识别能力
+
+### changsha-表具（8张）
+表计设备照片，用于测试 OCR 文字识别功能。
+
+- `IMG_20250710_144250.jpg` - 压力表
+- `IMG_20250710_144341.jpg` - 压力表
+- `IMG_20250710_144432.jpg` - 压力表
+- `IMG_20250710_144534.jpg` - 压力表
+- `IMG_20250710_144657.jpg` - 压力表
+- `IMG_20250710_144704.jpg` - 压力表
+- `IMG_20250710_144826.jpg` - 压力表
+- `IMG_20250710_144855.jpg` - 压力表
+
+**项目 ID**: `be0ceec0-27b3-4139-8636-05dd4412c769`
+
+**用途**：测试 PaddleOCR 中文识别能力
+
+## 🔍 相关文档
+
+测试指南和报告已移至 `docs/` 目录：
+
+- **测试指南**：
+  - `docs/ASSET_ENGINEERING_TEST_GUIDE.md` - Asset 与工程结构关联测试
+  - `docs/ENGINEERING_STRUCTURE_TEST_GUIDE.md` - 工程结构测试指南
+
+- **项目报告**：
+  - `docs/changsha_complete_report.md` - 长沙万象城项目完整报告
+  - `docs/长沙万象城总览.md` - 长沙万象城项目总览
+  - `docs/prompt_improvement_report.md` - 提示词优化效果报告
+
+## 📝 使用说明
+
+### 上传测试数据
+
+如果要添加新的测试数据：
+
+1. 创建对应的子文件夹（如 `tests/项目名-类型/`）
+2. 将测试图片放入该文件夹
+3. 使用脚本上传数据（参考 `docs/changsha_complete_report.md`）
+4. 记录项目 ID 和 Asset ID
+
+### 查询测试数据
+
 ```bash
-pytest tests/ -v
+# 查询所有测试资产
+GET http://localhost:8000/api/v1/assets?project_id=be0ceec0-27b3-4139-8636-05dd4412c769
+
+# 查询现场图片
+GET http://localhost:8000/api/v1/assets?project_id=be0ceec0-27b3-4139-8636-05dd4412c769&content_role=scene_issue
+
+# 查询表具图片
+GET http://localhost:8000/api/v1/assets?project_id=be0ceec0-27b3-4139-8636-05dd4412c769&content_role=meter
 ```
 
-### 运行特定类型测试
+### 查看 Asset 详情
+
 ```bash
-# 集成测试
-pytest tests/integration/ -v
-
-# 单元测试
-pytest tests/unit/ -v
-
-# API 测试
-pytest tests/api/ -v
+# 查看单张图片的详细分析结果
+GET http://localhost:8000/api/v1/assets/{asset_id}
 ```
 
-### 运行特定测试文件
+## 🗑️ 清理测试数据
+
+如果要删除测试项目：
+
 ```bash
-pytest tests/integration/test_project_creation.py -v
+# 软删除（推荐）- 数据保留但标记为已删除
+DELETE /api/v1/projects/be0ceec0-27b3-4139-8636-05dd4412c769?reason=测试完成清理
+
+# 硬删除（危险）- 物理删除所有数据
+DELETE /api/v1/projects/be0ceec0-27b3-4139-8636-05dd4412c769?hard_delete=true&reason=测试完成清理
 ```
 
-## 测试覆盖范围
+⚠️ **警告**：硬删除会级联删除所有相关的 Asset 记录，此操作不可逆！
 
-### ✅ 已完成测试
+## 📅 更新日志
 
-1. **test_project_creation.py**
-   - 项目创建 API
-   - Asset 上传 API
-   - 数据库持久化验证
+- **2025-01-20**: 整理 tests 目录，移动测试脚本和文档到相应位置
+- **2025-01-20**: 添加长沙万象城项目测试数据（12张图片）
+- **2025-01-20**: 完成提示词优化测试，所有图片用新提示词重新分析
 
-2. **test_paddleocr_pipeline.py**
-   - PaddleOCR 本地测试
-   - 图片文字识别
-   - 置信度评估
+## 📌 关于测试脚本
 
-3. **test_full_pipeline.py**
-   - 完整业务流程：创建项目 → 上传图片 → OCR 解析 → 查看结果
+之前的集成测试脚本已删除，因为：
+1. 它们主要用于功能开发阶段的验证
+2. 功能已稳定，改用 Swagger UI 手动测试更灵活
+3. 测试指南已整理到 `docs/` 目录
 
-### 📝 待添加测试
-
-- [ ] 单元测试：service 层业务逻辑
-- [ ] API 测试：所有端点的请求/响应验证
-- [ ] 性能测试：OCR 处理速度
-- [ ] 错误处理测试：异常情况覆盖
-
-## 测试数据
-
-测试使用的数据文件：
-- `C:\Users\86152\Downloads\设备铭牌\` - 设备铭牌图片（用于 OCR 测试）
-
-## 注意事项
-
-1. 测试前确保后端服务已启动：
-   ```bash
-   python -m uvicorn services.backend.app.main:app --reload
-   ```
-
-2. 某些测试需要本地环境变量：
-   ```bash
-   export BDC_DATABASE_URL=sqlite:///./data/bdc_ai.db
-   ```
-
-3. OCR 测试会下载 PaddleOCR 模型（首次运行较慢）
+如果需要重新运行测试，可以参考 `docs/ENGINEERING_STRUCTURE_TEST_GUIDE.md` 和 `docs/ASSET_ENGINEERING_TEST_GUIDE.md`。

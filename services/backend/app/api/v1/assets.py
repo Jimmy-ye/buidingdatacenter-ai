@@ -191,14 +191,19 @@ async def list_assets(
     zone_id: Optional[uuid.UUID] = Query(default=None, description="Filter by zone ID"),
     system_id: Optional[uuid.UUID] = Query(default=None, description="Filter by system ID"),
     device_id: Optional[uuid.UUID] = Query(default=None, description="Filter by device ID"),
+    updated_after: Optional[datetime] = Query(
+        default=None,
+        description="Return only assets with capture_time later than this UTC timestamp (incremental sync)",
+    ),
     db: Session = Depends(get_db),
 ) -> List[AssetRead]:
-    """List assets with optional multi-dimensional filters.
+    """List assets with optional multi-dimensional and incremental-sync filters.
 
     Supports filtering by:
     - project
     - modality / content_role
     - building / zone / system / device
+    - updated_after (for incremental sync based on capture_time)
     """
 
     query = db.query(Asset)
@@ -216,6 +221,8 @@ async def list_assets(
         query = query.filter(Asset.system_id == system_id)
     if device_id is not None:
         query = query.filter(Asset.device_id == device_id)
+    if updated_after is not None:
+        query = query.filter(Asset.capture_time > updated_after)
 
     assets = query.order_by(Asset.capture_time.desc().nullslast()).all()
     return assets

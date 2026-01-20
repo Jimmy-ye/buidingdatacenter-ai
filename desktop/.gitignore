@@ -1,0 +1,35 @@
+# Python 相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+nicegui_app/build/
+nicegui_app/dist/
+nicegui_app/*.egg-info/
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv
+
+# IDE 相关
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# NiceGUI 相关
+.nicegui/
+*.db
+*.log
+
+# 环境变量
+.env
+.env.local
+
+# 系统文件
+.DS_Store
+Thumbs.db

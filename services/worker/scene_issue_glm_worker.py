@@ -9,6 +9,10 @@ import requests
 from openai import OpenAI
 from PIL import Image
 import io
+from dotenv import load_dotenv
+
+# 加载 .env 文件
+load_dotenv()
 
 # ================= 配置区域 =================
 # 后端服务地址（FastAPI）
@@ -97,24 +101,36 @@ def build_scene_prompt(note: str | None) -> str:
     """构造发送给 GLM-4V 的中文 Prompt，要求输出 SceneIssueReportPayload JSON。"""
 
     base = """
-你是一名建筑节能与运行诊断工程师助手。
-请结合现场照片（image）和工程师备注（若有）分析现场问题或运行状态。
+你是一名建筑设备运行状态评估专家。
+你的任务是客观评估现场照片中设备的运行状态，区分"正常使用痕迹"和"需要关注的问题"。
+
+评估原则：
+1. 正常使用痕迹（轻微污垢、自然老化、轻微积灰）不是问题，不需要标记
+2. 只有影响设备性能、安全或美观的明显异常才需要报告
+3. 如果不确定，宁可标记为 low 或不报告问题
+4. 大多数设备是正常的，不要过度诊断
+
+严重程度定义：
+- low：设备状态正常，或仅有极轻微问题不影响运行（如轻微积灰、正常老化）
+- medium：明确的问题，有一定影响但非紧急（如明显污垢影响换热、轻微漏水）
+- high：严重问题，需要立即处理（如大量漏水、设备故障、明显安全隐患）
 
 严格按照下列 JSON 结构输出，不要包含任何多余文字或 markdown：
 {
-  "title": "一句话的简短标题，可为空",
-  "issue_category": "问题类别，例如：冷源效率、控制策略、设备维护、安全隐患、舒适性等，可为空",
-  "severity": "low | medium | high 之一",
-  "summary": "对现场主要问题或状态的简要描述，必须是非空字符串",
-  "suspected_causes": ["可能原因1", "可能原因2"],
-  "recommended_actions": ["建议措施1", "建议措施2"],
-  "confidence": 0.0 到 1.0 之间的数字，可为空,
-  "tags": ["若干短标签，用于过滤检索"]
+  "title": "一句话的简短标题，如果设备正常则为空",
+  "issue_category": "问题类别（如：冷源效率、控制策略、设备维护、安全隐患、舒适性），正常则为空",
+  "severity": "low | medium | high（正常设备使用 low）",
+  "summary": "状态描述。如果设备正常，明确说明'设备运行状态正常，未发现异常'",
+  "suspected_causes": ["可能原因列表，正常则为空"],
+  "recommended_actions": ["建议措施列表，正常则可为常规维护建议"],
+  "confidence": 0.0-1.0之间的数字（反映判断的确定程度，不确定时应降低到0.6-0.7）",
+  "tags": ["标签列表（如：设备类型、状态等）"]
 }
 
-要求：
-- 严格输出 JSON 对象（最外层是 { ... }），不要输出 explain、注释或 markdown。
-- 如果图片没有明显问题，也要在 summary 中说明是“未发现明显异常”，severity 可设为 "low"。
+重要提示：
+- 如果设备状态正常，severity 设为 "low"，summary 必须明确说明"运行正常"
+- 置信度应该反映你的判断确定性，不要过高（正常状态可给0.8-0.9，不确定的问题给0.6-0.8）
+- 严格输出 JSON 对象（最外层是 { ... }），不要输出 explain、注释或 markdown
 """.strip()
 
     if note:
