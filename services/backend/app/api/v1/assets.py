@@ -271,12 +271,15 @@ async def create_scene_issue_report(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
-    # Enforce that this endpoint is only used for scene_issue images
+    # Enforce that this endpoint is only used for image assets with supported roles
     role = (asset.content_role or "").lower()
-    if asset.modality != "image" or role != "scene_issue":
+    if asset.modality != "image" or role not in {"scene_issue", "meter"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scene_issue_report is only valid for image assets with content_role='scene_issue'",
+            detail=(
+                "scene_issue_report is only valid for image assets with "
+                "content_role in {'scene_issue', 'meter'}"
+            ),
         )
 
     existing_count = (
@@ -426,11 +429,20 @@ async def upload_image_with_note(
 
     # Optional automatic routing based on content_role
     if auto_route and asset.id:
+        print(
+            f"[DEBUG] upload_image_with_note auto_route={auto_route} "
+            f"asset_id={asset.id} content_role={asset.content_role!r}"
+        )
         try:
             routed = route_image_asset(db, asset)
+            print(
+                f"[DEBUG] route_image_asset returned asset_id={routed.id} "
+                f"status={routed.status}"
+            )
             return routed
-        except ValueError:
+        except ValueError as exc:
             # Fall back to plain asset if routing fails (e.g. non-image modality)
+            print(f"[WARN] route_image_asset failed for asset {asset.id}: {exc}")
             pass
 
     return asset

@@ -41,6 +41,113 @@ async def list_assets_for_device(device_id: str) -> List[Dict[str, Any]]:
     return await fetch_json(f"/devices/{device_id}/assets")
 
 
+def extract_keywords(asset: Dict[str, Any]) -> str:
+    """从资产中提取有意义的关键词用于表格展示"""
+    keywords: List[str] = []
+
+    # 1. 从 structured_payloads 数组中提取（优先级最高）
+    payloads = asset.get("structured_payloads") or []
+    for sp in payloads:
+        schema = sp.get("schema_type", "")
+        payload = sp.get("payload", {})
+
+        # 图片类型：提取 global_tags 和 OCR 检测到的对象
+        if schema == "image_annotation":
+            # global_tags
+            global_tags = payload.get("global_tags") or []
+            for tag in global_tags[:2]:
+                if isinstance(tag, str) and len(tag) > 0:
+                    keywords.append(tag)
+
+            # OCR 对象标签（top 2）
+            annotations = payload.get("annotations", {})
+            objects = annotations.get("objects", [])
+            for obj in objects[:2]:
+                label = obj.get("label", "")
+                if isinstance(label, str) and len(label) > 0 and len(label) < 20:
+                    keywords.append(label)
+
+        # 现场问题类型
+        elif schema == "scene_issue_report_v1":
+            issue_category = payload.get("issue_category", "")
+            if issue_category:
+                keywords.append(issue_category)
+            severity = payload.get("severity", "")
+            if severity:
+                keywords.append(f"严重度:{severity}")
+
+        # 表格类型：提取数据质量
+        elif schema == "table_data":
+            quality = payload.get("data_quality", "")
+            if quality:
+                keywords.append(f"质量:{quality}")
+
+    # 2. 如果还没有足够关键词，从 content_role 提取
+    if len(keywords) < 2:
+        role = asset.get("content_role")
+        if role:
+            # 将 role 翻译成中文
+            role_map = {
+                "meter": "仪表",
+                "scene_issue": "现场问题",
+                "nameplate": "铭牌",
+                "energy_table": "能耗表",
+                "runtime_table": "运行表",
+            }
+            role_cn = role_map.get(role, role)
+            keywords.append(role_cn)
+
+    # 3. 从 tags 提取（排除 environment 和 source）
+    tags = asset.get("tags") or {}
+    if isinstance(tags, dict):
+        for key, value in tags.items():
+            if key in {"environment", "source"}:
+                continue
+            if value not in (None, ""):
+                keywords.append(str(value))
+
+    # 4. 从 status 提取（parsed 状态）
+    status = asset.get("status", "")
+    if status:
+        status_map = {
+            "parsed_ocr_ok": "OCR完成",
+            "parsed_scene_llm": "场景分析完成",
+            "pending": "待处理",
+        }
+        status_cn = status_map.get(status, status)
+        keywords.append(status_cn)
+
+    # 去重并限制数量
+    seen: set[str] = set()
+    dedup: List[str] = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            dedup.append(kw)
+
+    return ", ".join(dedup[:3])
+
+
+def enrich_asset(asset: Dict[str, Any]) -> None:
+    capture_time = asset.get("capture_time")
+    short_date = "-"
+    if capture_time:
+        try:
+            ct_str = str(capture_time)
+            if ct_str.endswith("Z"):
+                ct_str = ct_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ct_str)
+            short_date = dt.strftime("%m-%d")
+        except Exception:
+            short_date = "-"
+    asset["short_date"] = short_date
+
+    try:
+        asset["keywords"] = extract_keywords(asset)
+    except Exception:
+        asset["keywords"] = ""
+
+
 def build_tree_nodes(tree: Dict[str, Any]) -> List[Dict[str, Any]]:
     """将后端返回的 structure_tree 转成 NiceGUI tree 所需格式."""
 
@@ -83,7 +190,7 @@ def main_page() -> None:
             tree_search = ui.input(placeholder="搜索结构名称...").props("dense clearable").classes("q-mt-sm")
             tree_widget = ui.tree([]).props("node-key=id")
 
-        # 右侧：顶部项目信息 + 资产列表 + 资产详情
+        # 右侧：顶部项目信息 + 资产列表 / 详情两列布局
         with ui.column().style("flex-grow: 1; height: 100%; overflow: auto;"):
             with ui.column().classes("q-pa-md"):
                 with ui.row().classes("items-center justify-between w-full"):
@@ -91,67 +198,106 @@ def main_page() -> None:
                     refresh_button = ui.button(icon="refresh").props("flat round dense")
                 project_meta = ui.label("").classes("text-caption text-grey")
 
-            ui.separator()
-            ui.label("资产列表 [已更新v8-rowClick修复]").classes("text-subtitle1 q-mt-md")
+                ui.separator()
 
-            # 资产过滤条：类型 / 角色 / 时间
-            with ui.row().classes("items-center q-mt-sm q-gutter-sm"):
-                modality_filter = ui.select(
-                    {
-                        "": "全部类型",
-                        "image": "图片",
-                        "table": "表格",
-                        "document": "文档",
-                    },
-                    value="",
-                    label="类型",
-                ).props("dense outlined")
-                role_filter = ui.select(
-                    {
-                        "": "全部角色",
-                        "meter": "仪表",
-                        "scene_issue": "现场问题",
-                        "nameplate": "铭牌",
-                        "energy_table": "能耗表",
-                        "runtime_table": "运行表",
-                    },
-                    value="",
-                    label="角色",
-                ).props("dense outlined")
-                time_filter = ui.select(
-                    {
-                        "all": "所有时间",
-                        "7d": "最近7天",
-                        "30d": "最近30天",
-                    },
-                    value="all",
-                    label="时间",
-                ).props("dense outlined")
+                with ui.row().classes("w-full q-mt-md items-start"):
+                    # 左列：资产过滤器 + 列表（约 40% 宽度）
+                    with ui.column().style("min-width: 40%; max-width: 40%;"):
+                        ui.label("资产列表").classes("text-subtitle1")
 
-            result_count_label = ui.label("").classes("text-caption text-grey q-mt-xs")
+                        with ui.row().classes("items-center q-mt-sm q-gutter-sm"):
+                            modality_filter = ui.select(
+                                {
+                                    "": "全部类型",
+                                    "image": "图片",
+                                    "table": "表格",
+                                    "document": "文档",
+                                },
+                                value="",
+                                label="类型",
+                            ).props("dense outlined")
+                            role_filter = ui.select(
+                                {
+                                    "": "全部角色",
+                                    "meter": "仪表",
+                                    "scene_issue": "现场问题",
+                                    "nameplate": "铭牌",
+                                    "energy_table": "能耗表",
+                                    "runtime_table": "运行表",
+                                },
+                                value="",
+                                label="角色",
+                            ).props("dense outlined")
+                            time_filter = ui.select(
+                                {
+                                    "all": "所有时间",
+                                    "7d": "最近7天",
+                                    "30d": "最近30天",
+                                },
+                                value="all",
+                                label="时间",
+                            ).props("dense outlined")
 
-            asset_table = ui.table(
-                columns=[
-                    {"name": "id", "label": "ID", "field": "id"},
-                    {"name": "title", "label": "标题", "field": "title"},
-                    {"name": "modality", "label": "类型", "field": "modality"},
-                    {"name": "content_role", "label": "角色", "field": "content_role"},
-                    {"name": "capture_time", "label": "采集时间", "field": "capture_time"},
-                ],
-                rows=[],
-            ).props('row-key="id" selection="single"').classes("w-full")
+                        result_count_label = ui.label("").classes("text-caption text-grey q-mt-xs")
 
-            detail_title = ui.label("资产详情").classes("text-subtitle1 q-mt-md")
-            detail_meta = ui.label("").classes("text-caption text-grey")
-            detail_body = ui.label("请选择左侧设备，加载资产后查看详情。").classes("text-body2")
-            detail_tags = ui.label("").classes("text-caption text-grey")
+                        asset_table = ui.table(
+                            columns=[
+                                {
+                                    "name": "title",
+                                    "label": "标题",
+                                    "field": "title",
+                                    "sortable": True,
+                                    "style": "max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
+                                },
+                                {
+                                    "name": "modality",
+                                    "label": "类型",
+                                    "field": "modality",
+                                    "sortable": True,
+                                    "style": "width: 80px;",
+                                },
+                                {
+                                    "name": "short_date",
+                                    "label": "日期",
+                                    "field": "short_date",
+                                    "sortable": True,
+                                    "style": "width: 80px;",
+                                },
+                                {
+                                    "name": "keywords",
+                                    "label": "关键词",
+                                    "field": "keywords",
+                                    "style": "width: 140px;",
+                                },
+                            ],
+                            rows=[],
+                        ).props('row-key="id" dense flat').classes("w-full")
 
-            with ui.row().classes("q-mt-sm q-gutter-sm"):
-                preview_button = ui.button("预览图片")
-                open_file_button = ui.button("打开原始文件")
+                    # 右列：资产详情 + 图片预览 + OCR/LLM 结果（剩余宽度）
+                    with ui.column().style("flex-grow: 1; min-width: 0; overflow: hidden;"):
+                        with ui.card().classes("w-full"):
+                            ui.label("基本信息").classes("text-subtitle2 q-mb-sm")
+                            detail_title = ui.label("资产详情").classes("text-subtitle1")
+                            detail_meta = ui.label("").classes("text-caption text-grey q-mb-xs")
+                            detail_body = ui.label("请选择左侧设备，加载资产后查看详情。").classes("text-body2").style("word-break: break-word;")
+                            detail_tags = ui.label("").classes("text-caption text-grey")
 
-            preview_image = ui.image().classes("q-mt-sm").style("max-width: 400px; max-height: 300px;")
-            preview_image.visible = False
+                        with ui.card().classes("w-full q-mt-sm"):
+                            ui.label("图片预览").classes("text-subtitle2 q-mb-sm")
+                            with ui.row().classes("items-center justify-center"):
+                                preview_image = ui.image().style(
+                                    "max-width: 400px; max-height: 260px; object-fit: contain;"
+                                )
+                                preview_image.visible = False
+                            with ui.row().classes("q-mt-sm q-gutter-sm"):
+                                preview_button = ui.button("预览图片")
+                                open_file_button = ui.button("打开原始文件")
+
+                        with ui.card().classes("w-full q-mt-sm"):
+                            ui.label("OCR/LLM 识别结果").classes("text-subtitle2 q-mb-sm")
+                            ocr_objects_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word;")
+                            ocr_text_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word;")
+                            llm_summary_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word;")
 
     projects_cache: List[Dict[str, Any]] = []
     full_tree_nodes: List[Dict[str, Any]] = []
@@ -203,6 +349,9 @@ def main_page() -> None:
             preview_image.visible = False
             preview_image.source = ""
             preview_button.disabled = True
+            ocr_objects_label.text = ""
+            ocr_text_label.text = ""
+            llm_summary_label.text = ""
             return
         asset = selected_asset
         title = asset.get("title") or asset.get("id") or "资产详情"
@@ -222,6 +371,100 @@ def main_page() -> None:
             preview_button.disabled = False
         else:
             preview_button.disabled = True
+
+        # 填充 OCR/LLM 识别结果区域
+        ocr_objects_label.text = ""
+        ocr_text_label.text = ""
+        llm_summary_label.text = ""
+
+        # 从 structured_payloads 数组中提取数据
+        payloads = asset.get("structured_payloads") or []
+        for sp in payloads:
+            schema = sp.get("schema_type", "")
+            data = sp.get("payload", {})
+
+            # 图片 OCR 识别结果
+            if schema == "image_annotation":
+                annotations = data.get("annotations", {}) or {}
+                ocr_lines = annotations.get("ocr_lines") or []
+
+                # 显示所有 OCR 文本（不限制行数）
+                if ocr_lines:
+                    texts = [line.get("text", "") for line in ocr_lines if line.get("text")]
+                    if texts:
+                        ocr_text = "\n".join(texts)
+                        ocr_text_label.text = ocr_text
+                else:
+                    # 回退到 derived_text 字段
+                    derived_text = data.get("derived_text")
+                    if isinstance(derived_text, str) and derived_text:
+                        ocr_text_label.text = derived_text
+
+                # 显示 OCR 统计信息
+                stats = data.get("stats", {})
+                if stats:
+                    engine = stats.get("engine", "unknown")
+                    avg_conf = stats.get("avg_confidence", 0)
+                    if isinstance(avg_conf, (int, float)):
+                        ocr_objects_label.text = f"OCR 引擎: {engine}\n平均置信度: {avg_conf:.1%}\n识别行数: {len(ocr_lines)}"
+
+                # 提取并显示所有数字（用于调试）
+                if ocr_lines:
+                    import re
+                    all_numbers = []
+                    for line in ocr_lines:
+                        text = line.get("text", "")
+                        conf = line.get("confidence", 0)
+                        # 提取所有数字（包括小数）
+                        numbers = re.findall(r"\d+\.?\d*", text)
+                        for num in numbers:
+                            try:
+                                val = float(num)
+                                all_numbers.append({
+                                    "value": val,
+                                    "text": text,
+                                    "confidence": conf
+                                })
+                            except ValueError:
+                                pass
+
+                    if all_numbers:
+                        # 按数值排序
+                        all_numbers.sort(key=lambda x: x["value"])
+
+                        # 显示所有提取的数字
+                        debug_lines = []
+                        for item in all_numbers:
+                            val = item["value"]
+                            txt = item["text"]
+                            conf = item.get("confidence", 0)
+                            debug_lines.append(f"  {val:6.2f} (置信度: {conf:.1%}) - 来自: \"{txt}\"")
+
+                        # 添加到 OCR 统计信息下方
+                        current_text = ocr_objects_label.text or ""
+                        ocr_objects_label.text = f"{current_text}\n\n【提取到的所有数字】\n" + "\n".join(debug_lines)
+
+            # 现场问题 LLM 分析结果
+            elif schema == "scene_issue_report_v1":
+                # 显示问题标题
+                issue_title = data.get("title", "")
+                if issue_title:
+                    llm_summary_label.text = f"【问题】{issue_title}\n"
+
+                # 显示问题摘要
+                summary = data.get("summary", "")
+                if summary:
+                    current_text = llm_summary_label.text or ""
+                    if len(summary) > 300:
+                        summary = summary[:300] + "..."
+                    llm_summary_label.text = current_text + f"\n【摘要】{summary}"
+
+                # 显示推荐措施
+                actions = data.get("recommended_actions") or []
+                if actions:
+                    current_text = llm_summary_label.text or ""
+                    action_text = "\n".join([f"• {a}" for a in actions[:3]])
+                    llm_summary_label.text = current_text + f"\n【建议】\n{action_text}"
 
     def apply_tree_filter() -> None:
         """根据搜索框过滤工程结构树。"""
@@ -371,7 +614,9 @@ def main_page() -> None:
         try:
             assets = await list_assets_for_device(device_id)
             all_assets_for_device.clear()
-            all_assets_for_device.extend(assets)
+            for a in assets:
+                enrich_asset(a)
+                all_assets_for_device.append(a)
             apply_asset_filters()
             loading_label.text = ""
         except Exception:
