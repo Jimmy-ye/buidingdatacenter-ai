@@ -385,41 +385,30 @@ def main_page() -> None:
     def on_asset_row_click(e: Any) -> None:
         nonlocal selected_asset
 
-        print(f"[DEBUG] on_asset_row_click 被触发，e: {e}")
-        print(f"[DEBUG] e.args: {e.args}")
-
         row = e.args
         # 兼容 emit(row) 或 emit([row]) 两种情况
         if isinstance(row, list):
             if not row:
-                print("[DEBUG] row 是空列表，返回")
                 return
-            print(f"[DEBUG] row 是列表，长度: {len(row)}, 第一个元素: {row[0]}")
             row = row[0]
         if not isinstance(row, dict):
-            print(f"[DEBUG] row 不是 dict，类型: {type(row)}，返回")
             return
 
         asset_id = row.get("id")
-        print(f"[DEBUG] 提取的 asset_id: {asset_id}")
         if not asset_id:
-            print("[DEBUG] asset_id 为空，返回")
             return
 
         # 从 all_assets_for_device 中找到完整资产对象（包含 file_path 等字段）
-        print(f"[DEBUG] 在 {len(all_assets_for_device)} 个资产中查找")
         for asset in all_assets_for_device:
             if str(asset.get("id")) == str(asset_id):
                 selected_asset = asset
-                print(f"[DEBUG] 找到匹配资产: {selected_asset.get('title')}")
+                print(f"[Asset] 选中资产: {asset.get('title')} (ID: {asset_id})")
                 break
         else:
             # 兜底：直接用行数据
             selected_asset = row
-            print(f"[DEBUG] 未找到匹配资产，使用 row 数据")
 
         update_asset_detail()
-        print(f"[DEBUG] update_asset_detail() 调用完成")
 
     asset_table.on(
         "rowClick",
