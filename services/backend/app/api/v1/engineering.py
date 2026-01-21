@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from shared.db.session import get_db
 from shared.db.models_project import Building, Zone, BuildingSystem, Device
-from shared.db.models_asset import Asset
+from shared.db.models_asset import Asset, FileBlob
 from ...schemas.engineering import (
     BuildingCreate,
     BuildingRead,
@@ -23,8 +23,23 @@ from ...schemas.engineering import (
 from ...schemas.asset import AssetDetailRead
 from ...services.tree_service import EngineeringTreeService
 
+# Helper function for asset serialization
+
 
 router = APIRouter()
+
+
+def _populate_asset_file_paths(assets: List[Asset], db: Session) -> List[AssetDetailRead]:
+    """Helper function to populate file_path for each asset."""
+    result = []
+    for asset in assets:
+        detail = AssetDetailRead.model_validate(asset)
+        if asset.file_id:
+            file_blob = db.query(FileBlob).filter(FileBlob.id == asset.file_id).first()
+            if file_blob:
+                detail.file_path = file_blob.path
+        result.append(detail)
+    return result
 
 
 @router.get(
@@ -557,7 +572,7 @@ async def list_assets_for_device(
         .order_by(Asset.capture_time.desc().nullslast())
         .all()
     )
-    return assets
+    return _populate_asset_file_paths(assets, db)
 
 
 @router.get(
@@ -575,7 +590,7 @@ async def list_assets_for_system(
         .order_by(Asset.capture_time.desc().nullslast())
         .all()
     )
-    return assets
+    return _populate_asset_file_paths(assets, db)
 
 
 @router.get(
@@ -593,7 +608,7 @@ async def list_assets_for_zone(
         .order_by(Asset.capture_time.desc().nullslast())
         .all()
     )
-    return assets
+    return _populate_asset_file_paths(assets, db)
 
 
 @router.get(
@@ -611,4 +626,4 @@ async def list_assets_for_building(
         .order_by(Asset.capture_time.desc().nullslast())
         .all()
     )
-    return assets
+    return _populate_asset_file_paths(assets, db)
