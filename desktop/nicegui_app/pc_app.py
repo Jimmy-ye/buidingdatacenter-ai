@@ -27,7 +27,7 @@ BASE_ASSET_DIR = os.path.abspath(SETTINGS.local_storage_dir)
 app.add_static_files(ASSET_WEB_PREFIX, BASE_ASSET_DIR)
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.5-refactor-stage2"
+UI_VERSION = "PC UI v0.3.6-refactor-stage3"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -53,6 +53,24 @@ except ImportError:
     STATE_MANAGEMENT_ENABLED = False
     def get_current_project():
         return None
+# ======================================================================
+
+# ==================== 新增：UI 组件（重构阶段 3）====================
+# 可复用的 UI 组件
+# 逐步从 main_page() 拆分出来的对话框、面板等组件
+try:
+    from desktop.nicegui_app.ui.dialogs import (
+        ProjectDialog,
+        show_create_project_dialog,
+        show_edit_project_dialog,
+    )
+    UI_COMPONENTS_ENABLED = True
+except ImportError:
+    # 如果导入失败，禁用 UI 组件
+    UI_COMPONENTS_ENABLED = False
+    ProjectDialog = None
+    show_create_project_dialog = None
+    show_edit_project_dialog = None
 # ======================================================================
 
 
@@ -899,138 +917,157 @@ def main_page() -> None:
     project_select.on_value_change(reload_tree)
 
     async def on_create_project_click() -> None:
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            name_input = ui.input(label="项目名称")
-            client_input = ui.input(label="客户")
-            location_input = ui.input(label="位置")
-            type_input = ui.input(label="类型")
-            status_input = ui.input(label="状态")
-            env_select = ui.select(
-                {
-                    "": "默认环境",
-                    "dev": "开发环境",
-                    "test": "测试环境",
-                    "prod": "生产环境",
-                },
-                value="",
-                label="环境标签",
-            ).props("dense outlined")
+        """创建项目点击事件（使用新的对话框组件）"""
+        if UI_COMPONENTS_ENABLED:
+            # 使用新的组件
+            show_create_project_dialog(
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=reload_projects_and_tree,
+            )
+        else:
+            # 保留旧代码作为后备
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                name_input = ui.input(label="项目名称")
+                client_input = ui.input(label="客户")
+                location_input = ui.input(label="位置")
+                type_input = ui.input(label="类型")
+                status_input = ui.input(label="状态")
+                env_select = ui.select(
+                    {
+                        "": "默认环境",
+                        "dev": "开发环境",
+                        "test": "测试环境",
+                        "prod": "生产环境",
+                    },
+                    value="",
+                    label="环境标签",
+                ).props("dense outlined")
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("保存", color="primary")
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("保存", color="primary")
 
-            async def do_create() -> None:
-                name = (name_input.value or "").strip()
-                if not name:
-                    ui.notify("项目名称不能为空", color="negative")
-                    return
+                async def do_create() -> None:
+                    name = (name_input.value or "").strip()
+                    if not name:
+                        ui.notify("项目名称不能为空", color="negative")
+                        return
 
-                tags: Dict[str, Any] = {}
-                if env_select.value:
-                    tags["environment"] = env_select.value
+                    tags: Dict[str, Any] = {}
+                    if env_select.value:
+                        tags["environment"] = env_select.value
 
-                payload: Dict[str, Any] = {
-                    "name": name,
-                    "client": client_input.value or None,
-                    "location": location_input.value or None,
-                    "type": type_input.value or None,
-                    "status": status_input.value or None,
-                    "tags": tags or None,
-                }
+                    payload: Dict[str, Any] = {
+                        "name": name,
+                        "client": client_input.value or None,
+                        "location": location_input.value or None,
+                        "type": type_input.value or None,
+                        "status": status_input.value or None,
+                        "tags": tags or None,
+                    }
 
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.post(f"{BACKEND_BASE_URL}/projects/", json=payload)
-                        resp.raise_for_status()
-                        data = resp.json()
-                        project_id = data.get("id")
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"创建项目失败: {exc}", color="negative")
-                    return
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.post(f"{BACKEND_BASE_URL}/projects/", json=payload)
+                            resp.raise_for_status()
+                            data = resp.json()
+                            project_id = data.get("id")
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"创建项目失败: {exc}", color="negative")
+                        return
 
-                dialog.close()
-                ui.notify("项目创建成功", color="positive")
-                await reload_projects_and_tree(str(project_id) if project_id else None)
+                    dialog.close()
+                    ui.notify("项目创建成功", color="positive")
+                    await reload_projects_and_tree(str(project_id) if project_id else None)
 
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_create)
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_create)
 
-        dialog.open()
+            dialog.open()
 
     async def on_edit_project_click() -> None:
+        """编辑项目点击事件（使用新的对话框组件）"""
         project = get_current_project()
         if not project:
             ui.notify("请先选择项目", color="warning")
             return
 
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            name_input = ui.input(label="项目名称", value=project.get("name") or "")
-            client_input = ui.input(label="客户", value=project.get("client") or "")
-            location_input = ui.input(label="位置", value=project.get("location") or "")
-            type_input = ui.input(label="类型", value=project.get("type") or "")
-            status_input = ui.input(label="状态", value=project.get("status") or "")
+        if UI_COMPONENTS_ENABLED:
+            # 使用新的组件
+            show_edit_project_dialog(
+                project=project,
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=reload_projects_and_tree,
+            )
+        else:
+            # 保留旧代码作为后备
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                name_input = ui.input(label="项目名称", value=project.get("name") or "")
+                client_input = ui.input(label="客户", value=project.get("client") or "")
+                location_input = ui.input(label="位置", value=project.get("location") or "")
+                type_input = ui.input(label="类型", value=project.get("type") or "")
+                status_input = ui.input(label="状态", value=project.get("status") or "")
 
-            tags = project.get("tags") or {}
-            current_env = tags.get("environment") or ""
-            env_select = ui.select(
-                {
-                    "": "默认环境",
-                    "dev": "开发环境",
-                    "test": "测试环境",
-                    "prod": "生产环境",
-                },
-                value=current_env,
-                label="环境标签",
-            ).props("dense outlined")
+                tags = project.get("tags") or {}
+                current_env = tags.get("environment") or ""
+                env_select = ui.select(
+                    {
+                        "": "默认环境",
+                        "dev": "开发环境",
+                        "test": "测试环境",
+                        "prod": "生产环境",
+                    },
+                    value=current_env,
+                    label="环境标签",
+                ).props("dense outlined")
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("保存", color="primary")
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("保存", color="primary")
 
-            async def do_update() -> None:
-                name = (name_input.value or "").strip()
-                if not name:
-                    ui.notify("项目名称不能为空", color="negative")
-                    return
+                async def do_update() -> None:
+                    name = (name_input.value or "").strip()
+                    if not name:
+                        ui.notify("项目名称不能为空", color="negative")
+                        return
 
-                update_tags: Dict[str, Any] = dict(tags)
-                if env_select.value:
-                    update_tags["environment"] = env_select.value
-                else:
-                    update_tags.pop("environment", None)
+                    update_tags: Dict[str, Any] = dict(tags)
+                    if env_select.value:
+                        update_tags["environment"] = env_select.value
+                    else:
+                        update_tags.pop("environment", None)
 
-                payload: Dict[str, Any] = {
-                    "name": name,
-                    "client": client_input.value or None,
-                    "location": location_input.value or None,
-                    "type": type_input.value or None,
-                    "status": status_input.value or None,
-                    "tags": update_tags or None,
-                }
+                    payload: Dict[str, Any] = {
+                        "name": name,
+                        "client": client_input.value or None,
+                        "location": location_input.value or None,
+                        "type": type_input.value or None,
+                        "status": status_input.value or None,
+                        "tags": update_tags or None,
+                    }
 
-                project_id = project.get("id")
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.patch(
-                            f"{BACKEND_BASE_URL}/projects/{project_id}",
-                            json=payload,
-                        )
-                        resp.raise_for_status()
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"更新项目失败: {exc}", color="negative")
-                    return
+                    project_id = project.get("id")
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.patch(
+                                f"{BACKEND_BASE_URL}/projects/{project_id}",
+                                json=payload,
+                            )
+                            resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"更新项目失败: {exc}", color="negative")
+                        return
 
-                dialog.close()
-                ui.notify("项目已更新", color="positive")
-                await reload_projects_and_tree(str(project_id) if project_id else None)
+                    dialog.close()
+                    ui.notify("项目已更新", color="positive")
+                    await reload_projects_and_tree(str(project_id) if project_id else None)
 
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_update)
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_update)
 
-        dialog.open()
+            dialog.open()
 
     async def on_delete_project_click() -> None:
         project = get_current_project()
