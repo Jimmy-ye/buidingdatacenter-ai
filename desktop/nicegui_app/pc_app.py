@@ -75,6 +75,13 @@ try:
         AssetDetailHelper,
         update_asset_detail_panel,
     )
+    from desktop.nicegui_app.ui.tables import (
+        AssetTableHelper,
+        AssetTableRowClickHandler,
+        get_asset_table_columns,
+        apply_asset_filters as apply_asset_filters_helper,
+        extract_asset_id_from_row_click,
+    )
     UI_COMPONENTS_ENABLED = True
 except ImportError:
     # 如果导入失败，禁用 UI 组件
@@ -91,6 +98,11 @@ except ImportError:
     show_delete_asset_dialog = None
     AssetDetailHelper = None
     update_asset_detail_panel = None
+    AssetTableHelper = None
+    AssetTableRowClickHandler = None
+    get_asset_table_columns = None
+    apply_asset_filters_helper = None
+    extract_asset_id_from_row_click = None
 # ======================================================================
 
 
@@ -334,8 +346,12 @@ def main_page() -> None:
 
                         result_count_label = ui.label("").classes("text-caption text-grey q-mt-xs")
 
-                        asset_table = ui.table(
-                            columns=[
+                        # 使用新的组件化表格列定义
+                        if UI_COMPONENTS_ENABLED and get_asset_table_columns is not None:
+                            table_columns = get_asset_table_columns()
+                        else:
+                            # 保留旧代码作为向后兼容
+                            table_columns = [
                                 {
                                     "name": "title",
                                     "label": "标题",
@@ -363,7 +379,10 @@ def main_page() -> None:
                                     "field": "keywords",
                                     "style": "width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
                                 },
-                            ],
+                            ]
+
+                        asset_table = ui.table(
+                            columns=table_columns,
                             rows=[],
                         ).props('row-key="id" dense flat').classes("w-full")
 
@@ -784,38 +803,48 @@ def main_page() -> None:
             result_count_label.text = "共 0 条"
             return
 
-        modality_value = modality_filter.value or ""
-        role_value = (role_filter.value or "").strip().lower()
-        time_value = time_filter.value or "all"
+        if UI_COMPONENTS_ENABLED and apply_asset_filters_helper is not None:
+            # 使用新的组件化过滤逻辑
+            filtered = apply_asset_filters_helper(
+                all_assets_for_device,
+                modality_filter=modality_filter.value or "",
+                role_filter=role_filter.value or "",
+                time_filter=time_filter.value or "all",
+            )
+        else:
+            # 保留旧代码作为向后兼容
+            modality_value = modality_filter.value or ""
+            role_value = (role_filter.value or "").strip().lower()
+            time_value = time_filter.value or "all"
 
-        now = datetime.utcnow()
-        cutoff: Optional[datetime] = None
-        if time_value == "7d":
-            cutoff = now - timedelta(days=7)
-        elif time_value == "30d":
-            cutoff = now - timedelta(days=30)
+            now = datetime.utcnow()
+            cutoff: Optional[datetime] = None
+            if time_value == "7d":
+                cutoff = now - timedelta(days=7)
+            elif time_value == "30d":
+                cutoff = now - timedelta(days=30)
 
-        filtered: List[Dict[str, Any]] = []
-        for asset in all_assets_for_device:
-            if modality_value and asset.get("modality") != modality_value:
-                continue
-            role = (asset.get("content_role") or "").lower()
-            if role_value and role != role_value:
-                continue
-            if cutoff is not None:
-                ct_raw = asset.get("capture_time")
-                if not ct_raw:
+            filtered: List[Dict[str, Any]] = []
+            for asset in all_assets_for_device:
+                if modality_value and asset.get("modality") != modality_value:
                     continue
-                try:
-                    ct_str = str(ct_raw)
-                    if ct_str.endswith("Z"):
-                        ct_str = ct_str.replace("Z", "+00:00")
-                    capture_dt = datetime.fromisoformat(ct_str)
-                except Exception:
+                role = (asset.get("content_role") or "").lower()
+                if role_value and role != role_value:
                     continue
-                if capture_dt < cutoff:
-                    continue
-            filtered.append(asset)
+                if cutoff is not None:
+                    ct_raw = asset.get("capture_time")
+                    if not ct_raw:
+                        continue
+                    try:
+                        ct_str = str(ct_raw)
+                        if ct_str.endswith("Z"):
+                            ct_str = ct_str.replace("Z", "+00:00")
+                        capture_dt = datetime.fromisoformat(ct_str)
+                    except Exception:
+                        continue
+                    if capture_dt < cutoff:
+                        continue
+                filtered.append(asset)
 
         asset_table.rows = filtered
         asset_table.update()
@@ -911,18 +940,25 @@ def main_page() -> None:
     async def on_asset_row_click(e: Any) -> None:
         nonlocal selected_asset
 
-        row = e.args
-        # 兼容 emit(row) 或 emit([row]) 两种情况
-        if isinstance(row, list):
-            if not row:
+        if UI_COMPONENTS_ENABLED and extract_asset_id_from_row_click is not None:
+            # 使用新的组件化行点击处理逻辑
+            asset_id = extract_asset_id_from_row_click(e)
+            if asset_id is None:
                 return
-            row = row[0]
-        if not isinstance(row, dict):
-            return
+        else:
+            # 保留旧代码作为向后兼容
+            row = e.args
+            # 兼容 emit(row) 或 emit([row]) 两种情况
+            if isinstance(row, list):
+                if not row:
+                    return
+                row = row[0]
+            if not isinstance(row, dict):
+                return
 
-        asset_id = row.get("id")
-        if not asset_id:
-            return
+            asset_id = row.get("id")
+            if not asset_id:
+                return
 
         try:
             detail = await get_asset_detail(str(asset_id))
@@ -930,7 +966,7 @@ def main_page() -> None:
             selected_asset = detail
         except Exception:
             ui.notify("加载资产详情失败，请稍后重试", color="negative")
-            selected_asset = row
+            selected_asset = e.args if isinstance(e.args, dict) else (e.args[0] if isinstance(e.args, list) and e.args else {})
 
         update_asset_detail()
 

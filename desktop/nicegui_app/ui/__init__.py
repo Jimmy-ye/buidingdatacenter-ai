@@ -25,6 +25,14 @@ from desktop.nicegui_app.ui.panels import (
     update_asset_detail_panel,
 )
 
+from desktop.nicegui_app.ui.tables import (
+    AssetTableHelper,
+    AssetTableRowClickHandler,
+    get_asset_table_columns,
+    apply_asset_filters,
+    extract_asset_id_from_row_click,
+)
+
 __all__ = [
     "ProjectDialog",
     "EngineeringNodeDialog",
@@ -38,4 +46,9 @@ __all__ = [
     "show_delete_asset_dialog",
     "AssetDetailHelper",
     "update_asset_detail_panel",
+    "AssetTableHelper",
+    "AssetTableRowClickHandler",
+    "get_asset_table_columns",
+    "apply_asset_filters",
+    "extract_asset_id_from_row_click",
 ]
