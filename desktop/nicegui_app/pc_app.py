@@ -90,6 +90,14 @@ from desktop.nicegui_app.helpers import (
     filter_tree_nodes,
     find_tree_node,
 )
+
+# ==================== 新增：事件处理（重构阶段 5）====================
+# 可复用的事件处理逻辑
+from desktop.nicegui_app.events import (
+    AssetStateRef,
+    AssetUIContext,
+    on_asset_row_click as on_asset_row_click_handler,
+)
 # ======================================================================
 
 
@@ -383,6 +391,14 @@ def main_page() -> None:
     # ==================== 旧状态变量（向后兼容）====================
     projects_cache: List[Dict[str, Any]] = []
     full_tree_nodes: List[Dict[str, Any]] = []
+
+    # 资产状态引用（阶段 5：使用容器引用）
+    asset_state_ref = AssetStateRef(
+        selected_asset=None,
+        all_assets_for_device=[],
+    )
+
+    # 为了向后兼容，保留旧变量名（指向 state_ref 内部）
     selected_asset: Optional[Dict[str, Any]] = None
     all_assets_for_device: List[Dict[str, Any]] = []
     current_device_id: Optional[str] = None
@@ -700,37 +716,48 @@ def main_page() -> None:
 
     tree_widget.on_select(on_select_tree)
 
-    # 表格行点击：点击时调用资产详情接口，加载完整数据，并自动预览图片
-    async def on_asset_row_click(e: Any) -> None:
-        nonlocal selected_asset
+    # ==================== 创建资产 UI 上下文（阶段 5）====================
+    asset_ui_context = AssetUIContext(
+        asset_state=asset_state_ref,
+        asset_table=asset_table,
+        detail_title=detail_title,
+        detail_meta=detail_meta,
+        detail_body=detail_body,
+        detail_tags=detail_tags,
+        preview_image=preview_image,
+        preview_button=preview_button,
+        ocr_objects_label=ocr_objects_label,
+        ocr_text_label=ocr_text_label,
+        llm_summary_label=llm_summary_label,
+        inference_status_label=inference_status_label,
+        run_ocr_button=run_ocr_button,
+        run_llm_button=run_llm_button,
+    )
 
-        # 使用新的组件化行点击处理逻辑
-        asset_id = extract_asset_id_from_row_click(e)
-        if asset_id is None:
-            return
+    # 表格行点击：使用新的事件处理模块
+    def make_asset_row_click_handler():
+        """创建资产行点击处理器"""
+        async def handler(e: Any) -> None:
+            nonlocal selected_asset
 
-        try:
-            detail = await get_asset_detail(str(asset_id))
-            enrich_asset(detail)
-            selected_asset = detail
-        except Exception:
-            ui.notify("加载资产详情失败，请稍后重试", color="negative")
-            selected_asset = e.args if isinstance(e.args, dict) else (e.args[0] if isinstance(e.args, list) and e.args else {})
+            # 调用新的事件处理函数
+            await on_asset_row_click_handler(
+                ctx=asset_ui_context,
+                e=e,
+                get_asset_detail_func=get_asset_detail,
+                enrich_asset_func=enrich_asset,
+                update_detail_func=update_asset_detail,
+                on_preview_func=on_preview_click,
+            )
 
-        update_asset_detail()
+            # 同步 state_ref 到旧变量（向后兼容）
+            selected_asset = asset_state_ref.selected_asset
 
-        # 如果是图片资产，自动触发一次预览
-        try:
-            modality = (selected_asset or {}).get("modality")
-            if modality == "image":
-                await on_preview_click()
-        except Exception:
-            # 预览失败不影响基本详情展示
-            pass
+        return handler
 
     asset_table.on(
         "rowClick",
-        on_asset_row_click,
+        make_asset_row_click_handler(),
         js_handler="(evt, row, index) => emit(row)",
     )
 
