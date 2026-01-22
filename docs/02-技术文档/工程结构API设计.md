@@ -60,8 +60,8 @@ class BuildingBase(BaseModel):
     name: str  # 建筑名称（必填）
     usage_type: str | None = None  # office/commercial/datacenter/mixed_use
     floor_area: float | None = None  # 建筑面积（m²）
+    gfa_area: float | None = None  # GFA 面积（m²）
     year_built: int | None = None  # 建成年份
-    energy_grade: str | None = None  # 能效等级 A/B/C
     tags: list[str] | None = None  # 标签（新增）
 
 class BuildingCreate(BuildingBase):
@@ -77,7 +77,6 @@ class BuildingRead(BuildingBase):
 用于 `GET /api/v1/projects/{project_id}/buildings`：
 
 - `usage_type: str | None` - 按建筑用途过滤
-- `energy_grade: str | None` - 按能效等级过滤
 - `name_contains: str | None` - 按名称模糊搜索
 - `tags: str | None` - 按标签筛选（逗号分隔，AND 逻辑）
 
