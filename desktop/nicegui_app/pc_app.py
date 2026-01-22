@@ -67,6 +67,9 @@ from desktop.nicegui_app.ui.dialogs import (
     show_create_building_dialog,
     show_edit_building_dialog,
     show_delete_building_dialog,
+    show_create_system_dialog,
+    show_create_zone_dialog,
+    show_create_device_dialog,
     show_upload_asset_dialog,
     show_delete_asset_dialog,
 )
@@ -274,8 +277,8 @@ def main_page() -> None:
     status_spinner.visible = True
 
     with ui.row().style("height: 100vh; width: 100vw;"):
-        # 左侧：工程结构树（缩小到 280px）
-        with ui.card().style("width: 280px; height: 100%; overflow: auto;"):
+        # 左侧：工程结构树（略加宽，提升可读性）
+        with ui.card().style("width: 340px; height: 100%; overflow: auto;"):
             ui.label("工程结构").classes("text-h6")
 
             with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
@@ -288,10 +291,22 @@ def main_page() -> None:
 
             with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
                 building_add_btn = ui.button("＋楼栋").props("dense outlined")
-                node_edit_btn = ui.button("编辑节点").props("dense outlined")
-                node_delete_btn = ui.button("删除节点").props("dense outlined")
+                system_add_btn = ui.button("＋系统").props("dense outlined")
+                zone_add_btn = ui.button("＋区域").props("dense outlined")
+                device_add_btn = ui.button("＋设备").props("dense outlined")
+
+            with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
+                node_edit_btn = ui.button("编辑楼栋", color="primary").props("dense outlined")
+                node_delete_btn = ui.button("删除楼栋", color="negative").props("dense outlined")
 
             tree_widget = ui.tree([]).props("node-key=id")
+
+            # 初始时禁用依赖树节点类型的按钮，避免误操作
+            system_add_btn.disable()
+            zone_add_btn.disable()
+            device_add_btn.disable()
+            node_edit_btn.disable()
+            node_delete_btn.disable()
 
         # 右侧：顶部项目信息 + 资产列表 / 详情两列布局
         with ui.column().style("flex-grow: 1; height: 100%; overflow: auto;"):
@@ -306,8 +321,8 @@ def main_page() -> None:
                 ui.separator()
 
                 with ui.row().classes("w-full q-mt-md items-start no-wrap"):
-                    # 左列：资产过滤器 + 列表（固定 40% 宽度，防止内容撑开）
-                    with ui.column().style("flex: 0 0 40%; width: 40%; min-width: 320px; overflow: hidden;"):
+                    # 左列：资产过滤器 + 列表（略加宽，提升可读性）
+                    with ui.column().style("flex: 0 0 45%; width: 45%; min-width: 360px; overflow: hidden;"):
                         ui.label("资产列表").classes("text-subtitle1")
 
                         with ui.row().classes("items-center q-mt-sm q-gutter-sm"):
@@ -699,6 +714,23 @@ def main_page() -> None:
         current_tree_node_type = node_type
         current_tree_node_id = raw_id
 
+        # 根据当前选中的节点类型，动态启用/禁用按钮
+        system_add_btn.disable()
+        zone_add_btn.disable()
+        device_add_btn.disable()
+        node_edit_btn.disable()
+        node_delete_btn.disable()
+
+        if node_type == "building" and raw_id:
+            # 楼栋节点：可以新增系统/区域、编辑/删除楼栋
+            system_add_btn.enable()
+            zone_add_btn.enable()
+            node_edit_btn.enable()
+            node_delete_btn.enable()
+        elif node_type == "system" and raw_id:
+            # 系统节点：可以在其下创建设备
+            device_add_btn.enable()
+
         # 只有在设备节点上才触发资产加载
         if node_type != "device" or not raw_id:
             return
@@ -895,7 +927,7 @@ def main_page() -> None:
         """创建楼栋点击事件（使用新的对话框组件）"""
         project = get_current_project()
         if not project:
-            ui.notify("请先选择项目", color="warning")
+            ui.notify("请先选择项目", color="warning", position="top")
             return
 
         project_id = project.get("id")
@@ -906,10 +938,52 @@ def main_page() -> None:
             on_success=reload_tree,
         )
 
+    async def on_create_system_click() -> None:
+        """创建系统点击事件（在选中的楼栋下创建系统）。"""
+        if current_tree_node_type != "building" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning", position="top")
+            return
+
+        building_id = current_tree_node_id
+
+        show_create_system_dialog(
+            building_id=building_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_tree,
+        )
+
+    async def on_create_zone_click() -> None:
+        """创建区域点击事件（在选中的楼栋下创建区域）。"""
+        if current_tree_node_type != "building" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning", position="top")
+            return
+
+        building_id = current_tree_node_id
+
+        show_create_zone_dialog(
+            building_id=building_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_tree,
+        )
+
+    async def on_create_device_click() -> None:
+        """创建设备点击事件（在选中的系统下创建设备）。"""
+        if current_tree_node_type != "system" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择一个系统节点", color="warning", position="top")
+            return
+
+        system_id = current_tree_node_id
+
+        show_create_device_dialog(
+            system_id=system_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_tree,
+        )
+
     async def on_edit_node_click() -> None:
         """编辑楼栋点击事件（使用新的对话框组件）"""
         if current_tree_node_type != "building" or not current_tree_node_id:
-            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning")
+            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning", position="top")
             return
 
         building_id = current_tree_node_id
@@ -923,7 +997,7 @@ def main_page() -> None:
     async def on_delete_node_click() -> None:
         """删除楼栋点击事件（使用新的对话框组件）"""
         if current_tree_node_type != "building" or not current_tree_node_id:
-            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning")
+            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning", position="top")
             return
 
         building_id = current_tree_node_id
@@ -937,6 +1011,9 @@ def main_page() -> None:
     project_create_btn.on_click(on_create_project_click)
     project_edit_btn.on_click(on_edit_project_click)
     project_delete_btn.on_click(on_delete_project_click)
+    system_add_btn.on_click(on_create_system_click)
+    zone_add_btn.on_click(on_create_zone_click)
+    device_add_btn.on_click(on_create_device_click)
     upload_asset_button.on_click(on_upload_asset_click)
     delete_asset_button.on_click(on_delete_asset_click)
     building_add_btn.on_click(on_create_building_click)

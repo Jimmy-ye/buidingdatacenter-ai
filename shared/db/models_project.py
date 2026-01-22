@@ -36,8 +36,8 @@ class Building(Base):
     name = Column(String(200), nullable=False)
     usage_type = Column(String(100), nullable=True)
     floor_area = Column(Float, nullable=True)
+    gfa_area = Column(Float, nullable=True)
     year_built = Column(Float, nullable=True)
-    energy_grade = Column(String(10), nullable=True)
     tags = Column(JSONB, nullable=True)
 
     project = relationship("Project", back_populates="buildings")

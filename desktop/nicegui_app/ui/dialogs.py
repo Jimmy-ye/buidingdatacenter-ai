@@ -568,6 +568,177 @@ class EngineeringNodeDialog:
 
         dialog.open()
 
+    def show_create_system(
+        self,
+        building_id: str,
+    ) -> None:
+        """显示创建系统对话框。"""
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("新建系统").classes("text-subtitle1")
+
+            name_input = ui.input(label="系统名称")
+            type_input = ui.input(label="系统类型（可选，默认同名称）")
+            desc_input = ui.input(label="描述（可选）")
+            tags_input = ui.input(label="标签（逗号分隔，可选）")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_create() -> None:
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("系统名称不能为空", color="negative")
+                    return
+
+                system_type = (type_input.value or "").strip() or name
+                tags_raw = (tags_input.value or "").strip()
+                tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                payload: Dict[str, Any] = {
+                    "type": system_type,
+                    "name": name,
+                    "description": desc_input.value or None,
+                    "tags": tags_list or None,
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{self.backend_base_url}/buildings/{building_id}/systems",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"创建系统失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("系统创建成功", color="positive")
+
+                if self.on_success:
+                    await self.on_success()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_create)
+
+        dialog.open()
+
+    def show_create_zone(
+        self,
+        building_id: str,
+    ) -> None:
+        """显示创建区域对话框。"""
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("新建区域").classes("text-subtitle1")
+
+            name_input = ui.input(label="区域名称")
+            type_input = ui.input(label="区域类型（可选）")
+            geom_input = ui.input(label="几何参考（可选）")
+            tags_input = ui.input(label="标签（逗号分隔，可选）")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_create() -> None:
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("区域名称不能为空", color="negative")
+                    return
+
+                tags_raw = (tags_input.value or "").strip()
+                tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                payload: Dict[str, Any] = {
+                    "name": name,
+                    "type": (type_input.value or None) or None,
+                    "geometry_ref": geom_input.value or None,
+                    "tags": tags_list or None,
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{self.backend_base_url}/buildings/{building_id}/zones",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"创建区域失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("区域创建成功", color="positive")
+
+                if self.on_success:
+                    await self.on_success()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_create)
+
+        dialog.open()
+
+    def show_create_device(
+        self,
+        system_id: str,
+    ) -> None:
+        """显示创建设备对话框。"""
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("新建设备").classes("text-subtitle1")
+
+            device_type_input = ui.input(label="设备类型（可选）")
+            model_input = ui.input(label="设备型号（可选）")
+            rated_power_input = ui.input(label="额定功率 kW（可选）")
+            serial_no_input = ui.input(label="序列号（可选）")
+            tags_input = ui.input(label="标签（逗号分隔，可选）")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_create() -> None:
+                rated_power = EngineeringNodeDialog._parse_float(rated_power_input.value)
+                tags_raw = (tags_input.value or "").strip()
+                tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                payload: Dict[str, Any] = {
+                    "zone_id": None,
+                    "device_type": device_type_input.value or None,
+                    "model": model_input.value or None,
+                    "rated_power": rated_power,
+                    "serial_no": serial_no_input.value or None,
+                    "tags": tags_list or None,
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{self.backend_base_url}/systems/{system_id}/devices",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"创建设备失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("设备创建成功", color="positive")
+
+                if self.on_success:
+                    await self.on_success()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_create)
+
+        dialog.open()
+
 
 # ==================== 便捷函数 ====================
 
@@ -640,6 +811,51 @@ def show_delete_building_dialog(
         on_success=on_success,
     )
     dialog.show_delete_building(building_id)
+    return dialog
+
+
+def show_create_system_dialog(
+    building_id: str,
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable] = None,
+) -> EngineeringNodeDialog:
+    """显示创建系统对话框（便捷函数）。"""
+
+    dialog = EngineeringNodeDialog(
+        backend_base_url=backend_base_url,
+        on_success=on_success,
+    )
+    dialog.show_create_system(building_id)
+    return dialog
+
+
+def show_create_zone_dialog(
+    building_id: str,
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable] = None,
+) -> EngineeringNodeDialog:
+    """显示创建区域对话框（便捷函数）。"""
+
+    dialog = EngineeringNodeDialog(
+        backend_base_url=backend_base_url,
+        on_success=on_success,
+    )
+    dialog.show_create_zone(building_id)
+    return dialog
+
+
+def show_create_device_dialog(
+    system_id: str,
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable] = None,
+) -> EngineeringNodeDialog:
+    """显示创建设备对话框（便捷函数）。"""
+
+    dialog = EngineeringNodeDialog(
+        backend_base_url=backend_base_url,
+        on_success=on_success,
+    )
+    dialog.show_create_device(system_id)
     return dialog
 
 
@@ -904,6 +1120,7 @@ class AssetDialog:
 def show_upload_asset_dialog(
     project_id: str,
     device_id: str,
+    project_name: Optional[str] = None,
     backend_base_url: str = "http://127.0.0.1:8000/api/v1",
     on_success: Optional[Callable] = None,
 ) -> AssetDialog:
@@ -923,7 +1140,7 @@ def show_upload_asset_dialog(
         backend_base_url=backend_base_url,
         on_success=on_success,
     )
-    dialog.show_upload_image(project_id, device_id)
+    dialog.show_upload_image(project_id, device_id, project_name=project_name)
     return dialog
 
 

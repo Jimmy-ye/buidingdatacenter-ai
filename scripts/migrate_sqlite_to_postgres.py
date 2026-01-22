@@ -126,8 +126,8 @@ def migrate():
                     name=b.name,
                     usage_type=b.usage_type,
                     floor_area=b.floor_area,
+                    gfa_area=getattr(b, "gfa_area", None),
                     year_built=b.year_built,
-                    energy_grade=b.energy_grade
                 )
                 postgres_session.add(new_b)
             except Exception as e:

@@ -530,6 +530,46 @@ async def upload_table_asset(
     return asset
 
 
+@router.delete(
+    "/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete asset and associated payloads/features and file blob",
+)
+async def delete_asset(
+    asset_id: uuid.UUID = Path(..., description="Asset ID"),
+    delete_file: bool = Query(
+        True,
+        description="If true, also delete underlying file on disk and related FileBlob record",
+    ),
+    db: Session = Depends(get_db),
+) -> None:
+    asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    file_blob = None
+    file_path: Optional[str] = None
+    if asset.file_id is not None:
+        file_blob = db.query(FileBlob).filter(FileBlob.id == asset.file_id).one_or_none()
+        if file_blob is not None:
+            file_path = file_blob.path
+
+    db.delete(asset)
+    if file_blob is not None:
+        db.delete(file_blob)
+    db.commit()
+
+    if delete_file and file_path:
+        base_dir = settings.local_storage_dir
+        abs_path = os.path.join(base_dir, file_path)
+        try:
+            if os.path.exists(abs_path):
+                os.remove(abs_path)
+        except OSError:
+            # 文件删除失败不影响接口结果
+            pass
+
+
 @router.post(
     "/{asset_id}/parse_image",
     response_model=AssetRead,
