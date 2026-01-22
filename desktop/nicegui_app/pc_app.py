@@ -4,18 +4,42 @@ import base64
 import os
 import subprocess
 import sys
+import inspect
 from datetime import datetime, timedelta
 from mimetypes import guess_type
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from nicegui import ui
+from nicegui import app, ui, events
 from nicegui.events import ValueChangeEventArguments
+
+# 添加项目根目录到 Python 路径
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.config.settings import get_settings
 
 BACKEND_BASE_URL = "http://127.0.0.1:8000/api/v1"
 SETTINGS = get_settings()
+ASSET_WEB_PREFIX = "/local_assets"
+BASE_ASSET_DIR = os.path.abspath(SETTINGS.local_storage_dir)
+app.add_static_files(ASSET_WEB_PREFIX, BASE_ASSET_DIR)
+
+# 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
+UI_VERSION = "PC UI v0.3.4-refactor-stage1"
+
+# ==================== 新增：API 客户端（重构阶段 1）====================
+# 创建统一的 API 客户端实例
+# 旧的 API 函数保留以确保向后兼容，但建议逐步迁移到 BackendClient
+try:
+    from desktop.nicegui_app.api.client import BackendClient
+    backend_client = BackendClient()
+except ImportError:
+    # 如果导入失败，创建一个空对象（向后兼容）
+    backend_client = None
+    logger = None
+# ======================================================================
 
 
 async def fetch_json(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -38,7 +62,12 @@ async def get_structure_tree(project_id: str) -> Dict[str, Any]:
 
 
 async def list_assets_for_device(device_id: str) -> List[Dict[str, Any]]:
-    return await fetch_json(f"/devices/{device_id}/assets")
+    """List assets for a device via the backend /assets endpoint with device_id filter."""
+    return await fetch_json("/assets/", params={"device_id": device_id})
+
+
+async def get_asset_detail(asset_id: str) -> Dict[str, Any]:
+    return await fetch_json(f"/assets/{asset_id}")
 
 
 def extract_keywords(asset: Dict[str, Any]) -> str:
@@ -182,12 +211,23 @@ def main_page() -> None:
     status_spinner.visible = True
 
     with ui.row().style("height: 100vh; width: 100vw;"):
-        # 左侧：工程结构树
-        with ui.card().style("width: 320px; height: 100%; overflow: auto;"):
+        # 左侧：工程结构树（缩小到 280px）
+        with ui.card().style("width: 280px; height: 100%; overflow: auto;"):
             ui.label("工程结构").classes("text-h6")
 
-            project_select = ui.select({}, value=None, label="项目")
+            with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
+                project_select = ui.select({}, value=None, label="项目").props("dense outlined")
+                project_create_btn = ui.button("＋项目").props("dense outlined")
+                project_edit_btn = ui.button("编辑").props("dense outlined")
+                project_delete_btn = ui.button("删除").props("dense outlined")
+
             tree_search = ui.input(placeholder="搜索结构名称...").props("dense clearable").classes("q-mt-sm")
+
+            with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
+                building_add_btn = ui.button("＋楼栋").props("dense outlined")
+                node_edit_btn = ui.button("编辑节点").props("dense outlined")
+                node_delete_btn = ui.button("删除节点").props("dense outlined")
+
             tree_widget = ui.tree([]).props("node-key=id")
 
         # 右侧：顶部项目信息 + 资产列表 / 详情两列布局
@@ -195,14 +235,16 @@ def main_page() -> None:
             with ui.column().classes("q-pa-md"):
                 with ui.row().classes("items-center justify-between w-full"):
                     project_title = ui.label("未选择项目").classes("text-h6")
-                    refresh_button = ui.button(icon="refresh").props("flat round dense")
+                    with ui.row().classes("items-center q-gutter-sm"):
+                        ui.label(UI_VERSION).classes("text-caption text-grey")
+                        refresh_button = ui.button(icon="refresh").props("flat round dense")
                 project_meta = ui.label("").classes("text-caption text-grey")
 
                 ui.separator()
 
-                with ui.row().classes("w-full q-mt-md items-start"):
-                    # 左列：资产过滤器 + 列表（约 40% 宽度）
-                    with ui.column().style("min-width: 40%; max-width: 40%;"):
+                with ui.row().classes("w-full q-mt-md items-start no-wrap"):
+                    # 左列：资产过滤器 + 列表（固定 40% 宽度，防止内容撑开）
+                    with ui.column().style("flex: 0 0 40%; width: 40%; min-width: 320px; overflow: hidden;"):
                         ui.label("资产列表").classes("text-subtitle1")
 
                         with ui.row().classes("items-center q-mt-sm q-gutter-sm"):
@@ -267,14 +309,18 @@ def main_page() -> None:
                                     "name": "keywords",
                                     "label": "关键词",
                                     "field": "keywords",
-                                    "style": "width: 140px;",
+                                    "style": "width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
                                 },
                             ],
                             rows=[],
                         ).props('row-key="id" dense flat').classes("w-full")
 
-                    # 右列：资产详情 + 图片预览 + OCR/LLM 结果（剩余宽度）
-                    with ui.column().style("flex-grow: 1; min-width: 0; overflow: hidden;"):
+                        with ui.row().classes("q-mt-sm q-gutter-sm"):
+                            upload_asset_button = ui.button("上传图片资产")
+                            delete_asset_button = ui.button("删除选中资产", color="negative")
+
+                    # 右列：资产详情 + 图片预览 + OCR/LLM 结果（固定 60% 宽度，防止内容撑开）
+                    with ui.column().style("flex: 0 0 60%; width: 60%; min-width: 0; overflow: hidden;"):
                         with ui.card().classes("w-full"):
                             ui.label("基本信息").classes("text-subtitle2 q-mb-sm")
                             detail_title = ui.label("资产详情").classes("text-subtitle1")
@@ -284,25 +330,71 @@ def main_page() -> None:
 
                         with ui.card().classes("w-full q-mt-sm"):
                             ui.label("图片预览").classes("text-subtitle2 q-mb-sm")
-                            with ui.row().classes("items-center justify-center"):
-                                preview_image = ui.image().style(
-                                    "max-width: 400px; max-height: 260px; object-fit: contain;"
+                            with ui.row().classes("items-center justify-center").style("width: 100%; min-width: 0;"):
+                                preview_image = ui.image().props("loading=eager fit=contain").style(
+                                    "width: 100%; max-width: 550px; height: 350px; min-width: 200px; background: #f5f5f5; border-radius: 4px;"
                                 )
                                 preview_image.visible = False
                             with ui.row().classes("q-mt-sm q-gutter-sm"):
                                 preview_button = ui.button("预览图片")
                                 open_file_button = ui.button("打开原始文件")
 
-                        with ui.card().classes("w-full q-mt-sm"):
+                            # 大图预览对话框
+                            preview_dialog = ui.dialog()
+                            with preview_dialog, ui.card():
+                                dialog_image = ui.image().props("loading=eager").style(
+                                    "max-width: 80vw; max-height: 80vh; object-fit: contain;"
+                                )
+
+                        with ui.card().classes("w-full q-mt-sm").style("overflow: auto; max-height: 500px;"):
                             ui.label("OCR/LLM 识别结果").classes("text-subtitle2 q-mb-sm")
-                            ocr_objects_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word;")
-                            ocr_text_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word;")
-                            llm_summary_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word;")
+                            inference_status_label = ui.label("").classes("text-caption text-grey q-mb-xs")
+                            with ui.row().classes("q-mb-sm q-gutter-sm"):
+                                run_ocr_button = ui.button("运行 OCR")
+                                run_llm_button = ui.button("生成现场问题报告")
+                            ocr_objects_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
+                            ocr_text_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
+                            llm_summary_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
 
     projects_cache: List[Dict[str, Any]] = []
     full_tree_nodes: List[Dict[str, Any]] = []
     selected_asset: Optional[Dict[str, Any]] = None
     all_assets_for_device: List[Dict[str, Any]] = []
+    current_device_id: Optional[str] = None
+    current_tree_node_type: Optional[str] = None
+    current_tree_node_id: Optional[str] = None
+
+    def update_inference_status() -> None:
+        nonlocal selected_asset
+        if not selected_asset:
+            inference_status_label.text = ""
+            run_ocr_button.disabled = True
+            run_llm_button.disabled = True
+            return
+
+        status = str(selected_asset.get("status") or "").lower()
+        modality = str(selected_asset.get("modality") or "").lower()
+        role = str(selected_asset.get("content_role") or "").lower()
+
+        msg = ""
+        if not status:
+            msg = "未解析，点击下方按钮运行 OCR 或提交 LLM 分析"
+        elif status == "parsed_ocr_ok":
+            msg = "OCR 完成（置信度较高）"
+        elif status == "parsed_ocr_low_conf":
+            msg = "OCR 完成（置信度较低，建议人工复核）"
+        elif status == "pending_scene_llm":
+            msg = "已提交到 LLM 管线，等待分析结果……"
+        elif status == "parsed_scene_llm":
+            msg = "LLM 场景分析已完成"
+        else:
+            msg = f"当前状态: {status}"
+
+        inference_status_label.text = msg
+
+        is_image = modality == "image"
+        run_ocr_button.disabled = not is_image
+        run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter"})
 
     def get_current_project() -> Optional[Dict[str, Any]]:
         if not project_select.value:
@@ -339,6 +431,46 @@ def main_page() -> None:
             parts.append(f"状态: {status}")
         project_meta.text = " • ".join(parts)
 
+    async def reload_projects_and_tree(selected_project_id: Optional[str] = None) -> None:
+        nonlocal projects_cache, selected_asset
+        status_spinner.visible = True
+
+        try:
+            projects = await list_projects()
+        except Exception:
+            projects = []
+
+        if not projects:
+            projects_cache = []
+            project_select.options = {}
+            project_select.value = None
+            tree_widget._props["nodes"] = []
+            tree_widget.update()
+            loading_label.text = "暂无项目，请先在后端创建项目"
+            status_spinner.visible = False
+            selected_asset = None
+            update_asset_detail()
+            return
+
+        projects_cache = projects
+        options = {p["id"]: p["name"] for p in projects}
+        project_select.options = options
+
+        target_id = None
+        if selected_project_id is not None:
+            for p in projects:
+                if str(p["id"]) == str(selected_project_id):
+                    target_id = p["id"]
+                    break
+        if target_id is None:
+            target_id = projects[0]["id"]
+
+        project_select.value = target_id
+        loading_label.text = ""
+        status_spinner.visible = False
+        update_project_header()
+        await reload_tree()
+
     def update_asset_detail() -> None:
         nonlocal selected_asset
         if not selected_asset:
@@ -349,6 +481,9 @@ def main_page() -> None:
             preview_image.visible = False
             preview_image.source = ""
             preview_button.disabled = True
+            inference_status_label.text = ""
+            run_ocr_button.disabled = True
+            run_llm_button.disabled = True
             ocr_objects_label.text = ""
             ocr_text_label.text = ""
             llm_summary_label.text = ""
@@ -366,7 +501,6 @@ def main_page() -> None:
         detail_body.text = str(description)
         detail_tags.text = f"Tags: {tags}" if tags else ""
         # 不再自动隐藏预览图，让用户可以连续预览
-        # preview_image.visible = False  # 移除这行
         if str(modality).lower() == "image":
             preview_button.disabled = False
         else:
@@ -377,14 +511,19 @@ def main_page() -> None:
         ocr_text_label.text = ""
         llm_summary_label.text = ""
 
+        update_inference_status()
+
+        # 对于表具类型，只显示 LLM 结果，不显示 OCR 详细内容
+        is_meter = (str(asset.get("content_role", "")) == "meter")
+
         # 从 structured_payloads 数组中提取数据
         payloads = asset.get("structured_payloads") or []
         for sp in payloads:
             schema = sp.get("schema_type", "")
             data = sp.get("payload", {})
 
-            # 图片 OCR 识别结果
-            if schema == "image_annotation":
+            # 图片 OCR 识别结果（表具类型跳过）
+            if schema == "image_annotation" and not is_meter:
                 annotations = data.get("annotations", {}) or {}
                 ocr_lines = annotations.get("ocr_lines") or []
 
@@ -547,17 +686,7 @@ def main_page() -> None:
         asset_table.update()
         result_count_label.text = f"共 {len(filtered)} 条"
 
-        previous_id = selected_asset.get("id") if isinstance(selected_asset, dict) else None
-        preserved = None
-        if previous_id is not None:
-            for a in filtered:
-                if a.get("id") == previous_id:
-                    preserved = a
-                    break
-        if preserved is not None:
-            selected_asset = preserved
-        else:
-            selected_asset = filtered[0] if filtered else None
+        selected_asset = None
         update_asset_detail()
 
     async def on_refresh_click() -> None:
@@ -571,8 +700,11 @@ def main_page() -> None:
         await reload_tree()
 
     async def reload_tree() -> None:
-        nonlocal selected_asset
+        nonlocal selected_asset, current_device_id, current_tree_node_type, current_tree_node_id
         # 切换项目或刷新结构树时，重置资产相关状态
+        current_device_id = None
+        current_tree_node_type = None
+        current_tree_node_id = None
         all_assets_for_device.clear()
         asset_table.rows = []
         asset_table.update()
@@ -603,14 +735,28 @@ def main_page() -> None:
             status_spinner.visible = False
 
     async def on_select_tree(e: ValueChangeEventArguments) -> None:
-        nonlocal selected_asset
+        nonlocal selected_asset, current_device_id, current_tree_node_type, current_tree_node_id
         value = e.value
         if not isinstance(value, str):
             return
-        # 约定 id 形如 "device:<uuid>"，只在设备节点上触发资产加载
-        if not value.startswith("device:"):
+
+        node_type: Optional[str] = None
+        raw_id: Optional[str] = None
+        if ":" in value:
+            parts = value.split(":", 1)
+            node_type, raw_id = parts[0], parts[1]
+        else:
+            raw_id = value
+
+        current_tree_node_type = node_type
+        current_tree_node_id = raw_id
+
+        # 只有在设备节点上才触发资产加载
+        if node_type != "device" or not raw_id:
             return
-        device_id = value.split(":", 1)[1]
+
+        device_id = raw_id
+        current_device_id = device_id
         try:
             assets = await list_assets_for_device(device_id)
             all_assets_for_device.clear()
@@ -626,8 +772,8 @@ def main_page() -> None:
 
     tree_widget.on_select(on_select_tree)
 
-    # 表格行点击：使用 NiceGUI 的通用事件接口 + js_handler 直接拿到 row
-    def on_asset_row_click(e: Any) -> None:
+    # 表格行点击：点击时调用资产详情接口，加载完整数据，并自动预览图片
+    async def on_asset_row_click(e: Any) -> None:
         nonlocal selected_asset
 
         row = e.args
@@ -643,17 +789,24 @@ def main_page() -> None:
         if not asset_id:
             return
 
-        # 从 all_assets_for_device 中找到完整资产对象（包含 file_path 等字段）
-        for asset in all_assets_for_device:
-            if str(asset.get("id")) == str(asset_id):
-                selected_asset = asset
-                print(f"[Asset] 选中资产: {asset.get('title')} (ID: {asset_id})")
-                break
-        else:
-            # 兜底：直接用行数据
+        try:
+            detail = await get_asset_detail(str(asset_id))
+            enrich_asset(detail)
+            selected_asset = detail
+        except Exception:
+            ui.notify("加载资产详情失败，请稍后重试", color="negative")
             selected_asset = row
 
         update_asset_detail()
+
+        # 如果是图片资产，自动触发一次预览
+        try:
+            modality = (selected_asset or {}).get("modality")
+            if modality == "image":
+                await on_preview_click()
+        except Exception:
+            # 预览失败不影响基本详情展示
+            pass
 
     asset_table.on(
         "rowClick",
@@ -670,73 +823,769 @@ def main_page() -> None:
 
     project_select.on_value_change(reload_tree)
 
-    async def on_preview_click() -> None:
-        """在右侧详情中预览图片（通过 data URL 内嵌），带路径安全检查。"""
-        print(f"[DEBUG] 预览按钮被点击")
-        print(f"[DEBUG] selected_asset: {selected_asset}")
+    async def on_create_project_click() -> None:
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            name_input = ui.input(label="项目名称")
+            client_input = ui.input(label="客户")
+            location_input = ui.input(label="位置")
+            type_input = ui.input(label="类型")
+            status_input = ui.input(label="状态")
+            env_select = ui.select(
+                {
+                    "": "默认环境",
+                    "dev": "开发环境",
+                    "test": "测试环境",
+                    "prod": "生产环境",
+                },
+                value="",
+                label="环境标签",
+            ).props("dense outlined")
 
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_create() -> None:
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("项目名称不能为空", color="negative")
+                    return
+
+                tags: Dict[str, Any] = {}
+                if env_select.value:
+                    tags["environment"] = env_select.value
+
+                payload: Dict[str, Any] = {
+                    "name": name,
+                    "client": client_input.value or None,
+                    "location": location_input.value or None,
+                    "type": type_input.value or None,
+                    "status": status_input.value or None,
+                    "tags": tags or None,
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(f"{BACKEND_BASE_URL}/projects/", json=payload)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        project_id = data.get("id")
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"创建项目失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("项目创建成功", color="positive")
+                await reload_projects_and_tree(str(project_id) if project_id else None)
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_create)
+
+        dialog.open()
+
+    async def on_edit_project_click() -> None:
+        project = get_current_project()
+        if not project:
+            ui.notify("请先选择项目", color="warning")
+            return
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            name_input = ui.input(label="项目名称", value=project.get("name") or "")
+            client_input = ui.input(label="客户", value=project.get("client") or "")
+            location_input = ui.input(label="位置", value=project.get("location") or "")
+            type_input = ui.input(label="类型", value=project.get("type") or "")
+            status_input = ui.input(label="状态", value=project.get("status") or "")
+
+            tags = project.get("tags") or {}
+            current_env = tags.get("environment") or ""
+            env_select = ui.select(
+                {
+                    "": "默认环境",
+                    "dev": "开发环境",
+                    "test": "测试环境",
+                    "prod": "生产环境",
+                },
+                value=current_env,
+                label="环境标签",
+            ).props("dense outlined")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_update() -> None:
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("项目名称不能为空", color="negative")
+                    return
+
+                update_tags: Dict[str, Any] = dict(tags)
+                if env_select.value:
+                    update_tags["environment"] = env_select.value
+                else:
+                    update_tags.pop("environment", None)
+
+                payload: Dict[str, Any] = {
+                    "name": name,
+                    "client": client_input.value or None,
+                    "location": location_input.value or None,
+                    "type": type_input.value or None,
+                    "status": status_input.value or None,
+                    "tags": update_tags or None,
+                }
+
+                project_id = project.get("id")
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.patch(
+                            f"{BACKEND_BASE_URL}/projects/{project_id}",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"更新项目失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("项目已更新", color="positive")
+                await reload_projects_and_tree(str(project_id) if project_id else None)
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_update)
+
+        dialog.open()
+
+    async def on_delete_project_click() -> None:
+        project = get_current_project()
+        if not project:
+            ui.notify("请先选择项目", color="warning")
+            return
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("删除项目（软删除）").classes("text-subtitle1")
+            ui.label("此操作会将项目标记为已删除，但不会物理删除数据库记录。")
+            reason_input = ui.input(label="删除原因")
+            operator_input = ui.input(label="操作人")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("确认删除", color="negative")
+
+            async def do_delete() -> None:
+                project_id = project.get("id")
+                params: Dict[str, Any] = {}
+                if reason_input.value:
+                    params["reason"] = reason_input.value
+
+                headers: Dict[str, str] = {}
+                if operator_input.value:
+                    headers["operator"] = str(operator_input.value)
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.delete(
+                            f"{BACKEND_BASE_URL}/projects/{project_id}",
+                            params=params,
+                            headers=headers or None,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"删除项目失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("项目已删除", color="positive")
+                await reload_projects_and_tree(None)
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_delete)
+
+        dialog.open()
+
+    async def on_run_ocr_click() -> None:
+        nonlocal selected_asset
         if not selected_asset:
-            print("[DEBUG] selected_asset为空")
+            ui.notify("请先在列表中选择一个资产", color="warning")
+            return
+
+        modality = str(selected_asset.get("modality") or "").lower()
+        if modality != "image":
+            ui.notify("当前资产不是图片，无法运行 OCR", color="warning")
+            return
+
+        asset_id = selected_asset.get("id")
+        if not asset_id:
+            ui.notify("资产ID缺失，无法运行 OCR", color="negative")
+            return
+
+        inference_status_label.text = "OCR 处理中……"
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(f"{BACKEND_BASE_URL}/assets/{asset_id}/parse_image")
+                resp.raise_for_status()
+        except Exception as exc:
+            inference_status_label.text = "OCR 失败"
+            ui.notify(f"运行 OCR 失败: {exc}", color="negative")
+            return
+
+        try:
+            detail = await get_asset_detail(str(asset_id))
+            enrich_asset(detail)
+            selected_asset = detail
+        except Exception as exc:
+            ui.notify(f"刷新资产详情失败: {exc}", color="negative")
+
+        update_asset_detail()
+
+    async def on_run_scene_llm_click() -> None:
+        nonlocal selected_asset
+        if not selected_asset:
+            ui.notify("请先在列表中选择一个资产", color="warning")
+            return
+
+        modality = str(selected_asset.get("modality") or "").lower()
+        role = str(selected_asset.get("content_role") or "").lower()
+        if modality != "image":
+            ui.notify("当前资产不是图片，无法提交 LLM 分析", color="warning")
+            return
+        if role not in {"scene_issue", "meter"}:
+            ui.notify("建议对角色为 scene_issue 或 meter 的图片运行现场问题分析", color="warning")
+
+        asset_id = selected_asset.get("id")
+        if not asset_id:
+            ui.notify("资产ID缺失，无法提交 LLM 分析", color="negative")
+            return
+
+        inference_status_label.text = "已提交到 LLM 管线，等待分析结果……"
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(f"{BACKEND_BASE_URL}/assets/{asset_id}/route_image")
+                resp.raise_for_status()
+        except Exception as exc:
+            ui.notify(f"提交 LLM 分析失败: {exc}", color="negative")
+            return
+
+        try:
+            detail = await get_asset_detail(str(asset_id))
+            enrich_asset(detail)
+            selected_asset = detail
+        except Exception as exc:
+            ui.notify(f"刷新资产详情失败: {exc}", color="negative")
+
+        update_asset_detail()
+
+    # 绑定 OCR / LLM 控制台按钮事件（需在两个 handler 定义之后）
+    run_ocr_button.on_click(on_run_ocr_click)
+    run_llm_button.on_click(on_run_scene_llm_click)
+
+    async def on_upload_asset_click() -> None:
+        if not project_select.value:
+            ui.notify("请先选择项目", color="warning")
+            return
+        if not current_device_id:
+            ui.notify("请先在左侧工程结构中选择一个设备节点", color="warning")
+            return
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("上传图片资产").classes("text-subtitle1")
+            ui.label(
+                f"项目: {project_select.options.get(project_select.value, project_select.value)}"
+            ).classes("text-caption text-grey")
+
+            role_select = ui.select(
+                {
+                    "": "默认角色",
+                    "meter": "仪表(meter)",
+                    "scene_issue": "现场问题(scene_issue)",
+                    "nameplate": "铭牌(nameplate)",
+                    "energy_table": "能耗表(energy_table)",
+                    "runtime_table": "运行表(runtime_table)",
+                },
+                value="",
+                label="内容角色",
+            ).props("dense outlined")
+
+            auto_route_checkbox = ui.checkbox("自动解析（OCR/LLM）", value=True)
+            note_input = ui.input(label="备注").props("type=textarea")
+            title_input = ui.input(label="标题（可选，默认使用文件名）")
+
+            # 文件选择提示
+            file_info_label = ui.label("尚未选择文件").classes("text-caption text-grey q-mb-sm")
+            status_label = ui.label("").classes("text-caption text-grey")
+
+            # 在 Python 端缓存已上传的单个文件内容
+            selected_file: Dict[str, Any] = {"name": None, "content": None, "type": None}
+
+            async def on_file_upload(e: events.UploadEventArguments) -> None:
+                """当浏览器将文件上传到 Python 端时缓存文件内容。
+
+                为兼容不同 NiceGUI 版本，依次尝试以下来源：
+                1) e.content  （旧版 API，中是 file-like）
+                2) e.file     （某些版本提供单文件属性）
+                3) e.files[0] （新版 API 提供 FileUpload 列表）
+                """
+                try:
+                    file_bytes: bytes = b""
+                    file_name: Optional[str] = None
+                    file_type: Optional[str] = None
+
+                    # 1) 旧版：e.content
+                    if hasattr(e, "content") and getattr(e, "content") is not None:
+                        print("[DEBUG] on_file_upload: 使用 e.content 读取")
+                        content_obj = getattr(e, "content")
+                        if hasattr(content_obj, "read"):
+                            result = content_obj.read()
+                            if inspect.iscoroutine(result):
+                                result = await result
+                            file_bytes = result or b""
+                        file_name = getattr(e, "name", None)
+                        file_type = getattr(e, "type", None)
+
+                    # 2) 可能存在的 e.file 属性
+                    elif hasattr(e, "file") and getattr(e, "file") is not None:
+                        print("[DEBUG] on_file_upload: 使用 e.file 读取")
+                        file_obj = getattr(e, "file")
+                        file_name = getattr(file_obj, "name", None)
+                        file_type = getattr(file_obj, "type", None)
+                        if hasattr(file_obj, "read"):
+                            result = file_obj.read()
+                            if inspect.iscoroutine(result):
+                                result = await result
+                            file_bytes = result or b""
+
+                    # 3) 新版：e.files 列表
+                    elif hasattr(e, "files"):
+                        files_attr = getattr(e, "files")
+                        print(f"[DEBUG] on_file_upload: e.files 类型={type(files_attr)} 值={files_attr}")
+                        if files_attr:
+                            file_obj = files_attr[0]
+                            file_name = getattr(file_obj, "name", None)
+                            file_type = getattr(file_obj, "type", None)
+                            if hasattr(file_obj, "read"):
+                                result = file_obj.read()
+                                if inspect.iscoroutine(result):
+                                    result = await result
+                                file_bytes = result or b""
+                        else:
+                            print("[DEBUG] on_file_upload: e.files 为空列表")
+
+                    else:
+                        print(f"[DEBUG] on_file_upload: UploadEventArguments 无 content / file / files 属性: {e}")
+
+                    selected_file["name"] = file_name
+                    selected_file["content"] = file_bytes
+                    selected_file["type"] = file_type
+
+                    if file_bytes:
+                        safe_name = file_name or "未命名文件"
+                        file_info_label.text = f"已选择: {safe_name}"
+                        file_info_label.classes("text-caption text-positive q-mb-sm")
+                        print(
+                            f"[DEBUG] 已接收到上传文件: {safe_name}, 大小={len(file_bytes)} bytes, type={file_type}"
+                        )
+                    else:
+                        file_info_label.text = "尚未选择文件"
+                        file_info_label.classes("text-caption text-grey q-mb-sm")
+                        print("[DEBUG] on_file_upload: 未能从事件中读取到任何文件字节")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[DEBUG] on_file_upload 处理异常: {exc}")
+
+            # 创建上传组件（auto_upload=True，文件到达 Python 端后触发 on_file_upload）
+            upload_component = ui.upload(
+                label="选择图片文件",
+                auto_upload=True,
+                on_upload=on_file_upload,
+            ).props('accept="image/*"')
+
+            async def handle_upload() -> None:
+                # 使用在 on_file_upload 中缓存的文件内容
+                if not selected_file.get("content"):
+                    ui.notify("请先选择一个文件并等待上传完成", color="warning")
+                    print("[DEBUG] handle_upload: 未找到已缓存的文件内容")
+                    return
+
+                file_name = selected_file.get("name") or "uploaded_image"
+                file_bytes = selected_file.get("content")
+                file_mime = selected_file.get("type") or "application/octet-stream"
+
+                print(f"[DEBUG] 开始上传文件到后端: {file_name}, size={len(file_bytes)} bytes, type={file_mime}")
+                status_label.text = "正在上传..."
+
+                params: Dict[str, Any] = {
+                    "project_id": str(project_select.value),
+                    "source": "pc_upload",
+                    "device_id": str(current_device_id),
+                }
+                if role_select.value:
+                    params["content_role"] = role_select.value
+                if auto_route_checkbox.value:
+                    params["auto_route"] = "true"
+
+                data = {
+                    "note": note_input.value or "",
+                    "title": title_input.value or file_name,
+                }
+
+                files = {
+                    "file": (
+                        file_name,
+                        file_bytes,
+                        file_mime,
+                    )
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=120.0) as client:
+                        resp = await client.post(
+                            f"{BACKEND_BASE_URL}/assets/upload_image_with_note",
+                            params=params,
+                            data=data,
+                            files=files,
+                        )
+                        resp.raise_for_status()
+                        new_asset = resp.json()
+                except Exception as exc:  # noqa: BLE001
+                    status_label.text = ""
+                    ui.notify(f"上传失败: {exc}", color="negative")
+                    return
+
+                enrich_asset(new_asset)
+                all_assets_for_device.append(new_asset)
+                apply_asset_filters()
+
+                status_label.text = ""
+                ui.notify("上传成功", color="positive")
+                # 重置已选择文件状态
+                selected_file["name"] = None
+                selected_file["content"] = None
+                selected_file["type"] = None
+                try:
+                    upload_component.reset()
+                except Exception:
+                    pass
+                dialog.close()
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                confirm_btn = ui.button("确认上传", color="positive")
+                cancel_btn = ui.button("取消")
+
+            confirm_btn.on_click(handle_upload)
+            cancel_btn.on_click(dialog.close)
+
+        dialog.open()
+
+    async def on_delete_asset_click() -> None:
+        nonlocal selected_asset
+        if not selected_asset:
+            ui.notify("请先在列表中选择一个资产", color="warning")
+            return
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("删除资产").classes("text-subtitle1")
+            ui.label("此操作会删除资产及其解析结果。")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("确认删除", color="negative")
+
+            async def do_delete() -> None:
+                nonlocal selected_asset
+                asset_id = selected_asset.get("id") if selected_asset else None
+                if not asset_id:
+                    ui.notify("资产ID缺失，无法删除", color="negative")
+                    return
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id}")
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"删除资产失败: {exc}", color="negative")
+                    return
+
+                # 从当前设备资产列表中移除该资产
+                remaining: List[Dict[str, Any]] = [
+                    a for a in all_assets_for_device if str(a.get("id")) != str(asset_id)
+                ]
+                all_assets_for_device.clear()
+                all_assets_for_device.extend(remaining)
+
+                selected_asset = None
+                apply_asset_filters()
+
+                ui.notify("资产已删除", color="positive")
+                dialog.close()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_delete)
+
+        dialog.open()
+
+    async def on_create_building_click() -> None:
+        project = get_current_project()
+        if not project:
+            ui.notify("请先选择项目", color="warning")
+            return
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("新建楼栋").classes("text-subtitle1")
+
+            name_input = ui.input(label="楼栋名称")
+            usage_input = ui.input(label="用途（可选）")
+            floor_area_input = ui.input(label="建筑面积 m²（可选）")
+            gfa_area_input = ui.input(label="GFA 面积 m²（可选）")
+            year_built_input = ui.input(label="建成年份（可选）")
+            tags_input = ui.input(label="标签（逗号分隔，可选）")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_create() -> None:
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("楼栋名称不能为空", color="negative")
+                    return
+
+                def parse_float(value: Any) -> Optional[float]:
+                    try:
+                        text = str(value).strip()
+                        return float(text) if text else None
+                    except Exception:
+                        return None
+
+                floor_area = parse_float(floor_area_input.value)
+                gfa_area = parse_float(gfa_area_input.value)
+                year_built = parse_float(year_built_input.value)
+
+                tags_raw = (tags_input.value or "").strip()
+                tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                payload: Dict[str, Any] = {
+                    "name": name,
+                    "usage_type": usage_input.value or None,
+                    "floor_area": floor_area,
+                    "gfa_area": gfa_area,
+                    "year_built": year_built,
+                    "tags": tags_list or None,
+                }
+
+                project_id = project.get("id")
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{BACKEND_BASE_URL}/projects/{project_id}/buildings",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"创建楼栋失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("楼栋创建成功", color="positive")
+                await reload_tree()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_create)
+
+        dialog.open()
+
+    async def on_edit_node_click() -> None:
+        if current_tree_node_type != "building" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning")
+            return
+
+        building_id = current_tree_node_id
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(f"{BACKEND_BASE_URL}/buildings/{building_id}")
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            ui.notify(f"加载楼栋信息失败: {exc}", color="negative")
+            return
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("编辑楼栋").classes("text-subtitle1")
+
+            name_input = ui.input(label="楼栋名称", value=data.get("name") or "")
+            usage_input = ui.input(label="用途（可选）", value=data.get("usage_type") or "")
+
+            def fmt_float(v: Any) -> str:
+                return "" if v is None else str(v)
+
+            floor_area_input = ui.input(
+                label="建筑面积 m²（可选）",
+                value=fmt_float(data.get("floor_area")),
+            )
+            gfa_area_input = ui.input(
+                label="GFA 面积 m²（可选）",
+                value=fmt_float(data.get("gfa_area")),
+            )
+            year_built_input = ui.input(
+                label="建成年份（可选）",
+                value=fmt_float(data.get("year_built")),
+            )
+
+            tags_value = ""
+            tags_list = data.get("tags") or []
+            if isinstance(tags_list, list):
+                tags_value = ",".join(str(t) for t in tags_list)
+            tags_input = ui.input(label="标签（逗号分隔，可选）", value=tags_value)
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_update() -> None:
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("楼栋名称不能为空", color="negative")
+                    return
+
+                def parse_float(value: Any) -> Optional[float]:
+                    try:
+                        text = str(value).strip()
+                        return float(text) if text else None
+                    except Exception:
+                        return None
+
+                floor_area = parse_float(floor_area_input.value)
+                gfa_area = parse_float(gfa_area_input.value)
+                year_built = parse_float(year_built_input.value)
+
+                tags_raw = (tags_input.value or "").strip()
+                tags_list_local = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                payload: Dict[str, Any] = {
+                    "name": name,
+                    "usage_type": usage_input.value or None,
+                    "floor_area": floor_area,
+                    "gfa_area": gfa_area,
+                    "year_built": year_built,
+                    "tags": tags_list_local or None,
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.patch(
+                            f"{BACKEND_BASE_URL}/buildings/{building_id}",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"更新楼栋失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("楼栋已更新", color="positive")
+                await reload_tree()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_update)
+
+        dialog.open()
+
+    async def on_delete_node_click() -> None:
+        if current_tree_node_type != "building" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择一个楼栋节点", color="warning")
+            return
+
+        building_id = current_tree_node_id
+
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("删除楼栋").classes("text-subtitle1")
+            ui.label("此操作会删除楼栋及其下属结构，请谨慎操作。")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("确认删除", color="negative")
+
+            async def do_delete() -> None:
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.delete(f"{BACKEND_BASE_URL}/buildings/{building_id}")
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"删除楼栋失败: {exc}", color="negative")
+                    return
+
+                ui.notify("楼栋已删除", color="positive")
+                dialog.close()
+                await reload_tree()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_delete)
+
+        dialog.open()
+
+    project_create_btn.on_click(on_create_project_click)
+    project_edit_btn.on_click(on_edit_project_click)
+    project_delete_btn.on_click(on_delete_project_click)
+    upload_asset_button.on_click(on_upload_asset_click)
+    delete_asset_button.on_click(on_delete_asset_click)
+    building_add_btn.on_click(on_create_building_click)
+    node_edit_btn.on_click(on_edit_node_click)
+    node_delete_btn.on_click(on_delete_node_click)
+
+    async def on_preview_click() -> None:
+        """在右侧详情卡片中预览图片，使用 HTTP URL 快速加载。"""
+        if not selected_asset:
             ui.notify("请先选择一个资产", color="warning")
             return
 
         modality = selected_asset.get("modality")
-        print(f"[DEBUG] modality: {modality}")
-
         if modality != "image":
-            print(f"[DEBUG] 不是图片类型，无法预览")
             ui.notify("当前资产不是图片，无法预览", color="warning")
             return
 
         rel_path = selected_asset.get("file_path")
-        print(f"[DEBUG] file_path: {rel_path}")
-
         if not rel_path:
-            print("[DEBUG] file_path为空")
             ui.notify("该资产缺少文件路径信息", color="warning")
             return
 
+        # 路径安全检查
         base_dir = os.path.abspath(SETTINGS.local_storage_dir)
         abs_path = os.path.abspath(os.path.join(base_dir, str(rel_path)))
-        print(f"[DEBUG] base_dir: {base_dir}")
-        print(f"[DEBUG] abs_path: {abs_path}")
-        print(f"[DEBUG] 文件存在: {os.path.exists(abs_path)}")
 
         try:
             common = os.path.commonpath([base_dir, abs_path])
         except ValueError:
-            print("[DEBUG] 路径验证失败: ValueError")
             ui.notify("文件路径不合法", color="negative")
             return
 
         if common != base_dir:
-            print(f"[DEBUG] 路径验证失败: common={common}, base_dir={base_dir}")
             ui.notify("文件路径不合法", color="negative")
             return
 
         if not os.path.exists(abs_path):
-            print("[DEBUG] 文件不存在")
             ui.notify("本地文件不存在，请检查后端存储目录", color="negative")
             return
 
-        mime_type, _ = guess_type(abs_path)
-        if mime_type is None:
-            mime_type = "image/jpeg"
-        print(f"[DEBUG] mime_type: {mime_type}")
-
-        try:
-            with open(abs_path, "rb") as f:
-                data = f.read()
-            print(f"[DEBUG] 成功读取文件，大小: {len(data)} bytes")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[DEBUG] 读取文件失败: {exc}")
-            ui.notify(f"读取图片失败: {exc}", color="negative")
-            return
-
-        b64 = base64.b64encode(data).decode("ascii")
-        preview_image.source = f"data:{mime_type};base64,{b64}"
+        # 使用 HTTP URL 而不是 Data URL（性能更好，支持大文件）
+        # URL 格式：/local_assets/项目ID/设备ID/文件名.png
+        # 注意：需要将 Windows 路径的 \ 替换为 /
+        url_path = rel_path.replace("\\", "/")
+        preview_image.source = f"/local_assets/{url_path}"
         preview_image.visible = True
-        print(f"[DEBUG] 预览图已设置，visible=True")
+
+        print(f"[DEBUG] 预览图片: {rel_path}")
+        print(f"[DEBUG] URL 路径: {url_path}")
+        print(f"[DEBUG] 完整 URL: {preview_image.source}")
+        print(f"[DEBUG] 文件存在: {os.path.exists(abs_path)}")
+        print(f"[DEBUG] 静态目录: {SETTINGS.local_storage_dir}")
         ui.notify("图片已加载", color="positive")
 
     async def on_open_file_click() -> None:
@@ -776,22 +1625,7 @@ def main_page() -> None:
     open_file_button.on_click(on_open_file_click)
 
     async def load_initial_data() -> None:
-        nonlocal projects_cache
-        status_spinner.visible = True
-        projects = await list_projects()
-        if not projects:
-            loading_label.text = "暂无项目，请先在后端创建项目"
-            status_spinner.visible = False
-            return
-
-        projects_cache = projects
-        options = {p["id"]: p["name"] for p in projects}
-        project_select.options = options
-        project_select.value = projects[0]["id"]
-        loading_label.text = ""
-        status_spinner.visible = False
-        update_project_header()
-        await reload_tree()
+        await reload_projects_and_tree(None)
 
     # 使用 timer 在页面渲染后异步加载数据，避免阻塞首屏
     ui.timer(0.1, load_initial_data, once=True)
