@@ -142,20 +142,30 @@ class BackendClient:
         Returns:
             项目列表
         """
+        # 注意：后端路由是 /api/v1/engineering/projects/
+        # 但前端调用的是 /api/v1/projects/ (在旧代码中)
+        # 这里使用旧路径以保持向后兼容
         result = await self.get("/projects/")
         return result if isinstance(result, list) else []
 
-    async def get_project(self, project_id: str) -> Dict[str, Any]:
+    async def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
         """
-        获取项目详情
+        获取项目详情（从列表中查找）
+
+        注意：后端没有单独的 GET /projects/{id} 端点，
+        需要从列表中查找对应的项目
 
         Args:
             project_id: 项目 ID
 
         Returns:
-            项目详情
+            项目详情，如果未找到返回 None
         """
-        return await self.get(f"/projects/{project_id}")
+        projects = await self.list_projects()
+        for project in projects:
+            if str(project.get("id")) == str(project_id):
+                return project
+        return None
 
     async def create_project(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
