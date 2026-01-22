@@ -21,9 +21,14 @@ from desktop.nicegui_app.ui.dialogs import (
 @dataclass
 class AssetStateRef:
     """
-    资产状态引用（容器）
+    资产状态引用容器。
 
-    使用容器而不是直接值，确保事件处理函数中的修改对外部可见。
+    用于在事件处理模块和 pc_app.py 之间传递、共享与资产相关的状态：
+    - selected_asset: 当前选中的资产（详情面板的数据来源）
+    - all_assets_for_device: 当前设备下的资产列表（资产表格的数据来源）
+
+    使用容器而不是直接值，可以保证在事件处理函数内部对状态的修改
+    对外部调用方（例如 pc_app.py 中的闭包变量）是可见、可同步的。
     """
     selected_asset: Optional[Dict[str, Any]] = None
     all_assets_for_device: Optional[List[Dict[str, Any]]] = None
@@ -36,9 +41,17 @@ class AssetStateRef:
 @dataclass
 class AssetUIContext:
     """
-    资产 UI 上下文
+    资产相关事件的 UI 上下文。
 
-    包含资产相关事件处理需要的 UI 元素和状态引用。
+    将一组在多个事件中反复使用的 UI 元素和状态引用集中到一个对象中，
+    避免在函数签名中传递过长的参数列表。
+
+    主要包含：
+    - asset_state: 资产状态引用（AssetStateRef）
+    - asset_table: 资产表格组件
+    - detail_*: 右侧详情面板的标题、元信息、正文、标签等组件
+    - preview_*: 预览图片及其触发按钮
+    - ocr_text / llm_summary / inference_status / 按钮：OCR/LLM 相关展示和控制组件
     """
     # 状态引用
     asset_state: AssetStateRef
