@@ -62,11 +62,14 @@ try:
     from desktop.nicegui_app.ui.dialogs import (
         ProjectDialog,
         EngineeringNodeDialog,
+        AssetDialog,
         show_create_project_dialog,
         show_edit_project_dialog,
         show_create_building_dialog,
         show_edit_building_dialog,
         show_delete_building_dialog,
+        show_upload_asset_dialog,
+        show_delete_asset_dialog,
     )
     UI_COMPONENTS_ENABLED = True
 except ImportError:
@@ -74,11 +77,14 @@ except ImportError:
     UI_COMPONENTS_ENABLED = False
     ProjectDialog = None
     EngineeringNodeDialog = None
+    AssetDialog = None
     show_create_project_dialog = None
     show_edit_project_dialog = None
     show_create_building_dialog = None
     show_edit_building_dialog = None
     show_delete_building_dialog = None
+    show_upload_asset_dialog = None
+    show_delete_asset_dialog = None
 # ======================================================================
 
 
@@ -1204,6 +1210,7 @@ def main_page() -> None:
     run_llm_button.on_click(on_run_scene_llm_click)
 
     async def on_upload_asset_click() -> None:
+        """上传资产点击事件（使用新的对话框组件）"""
         if not project_select.value:
             ui.notify("请先选择项目", color="warning")
             return
@@ -1211,80 +1218,81 @@ def main_page() -> None:
             ui.notify("请先在左侧工程结构中选择一个设备节点", color="warning")
             return
 
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            ui.label("上传图片资产").classes("text-subtitle1")
-            ui.label(
-                f"项目: {project_select.options.get(project_select.value, project_select.value)}"
-            ).classes("text-caption text-grey")
+        project_id = str(project_select.value)
+        device_id = str(current_device_id)
+        project_name = project_select.options.get(project_select.value, project_select.value)
 
-            role_select = ui.select(
-                {
-                    "": "默认角色",
-                    "meter": "仪表(meter)",
-                    "scene_issue": "现场问题(scene_issue)",
-                    "nameplate": "铭牌(nameplate)",
-                    "energy_table": "能耗表(energy_table)",
-                    "runtime_table": "运行表(runtime_table)",
-                },
-                value="",
-                label="内容角色",
-            ).props("dense outlined")
+        if UI_COMPONENTS_ENABLED:
+            # 创建适配的回调函数
+            async def on_upload_success(new_asset: Dict[str, Any]) -> None:
+                """上传成功后的回调"""
+                nonlocal all_assets_for_device
+                enrich_asset(new_asset)
+                all_assets_for_device.append(new_asset)
+                apply_asset_filters()
 
-            auto_route_checkbox = ui.checkbox("自动解析（OCR/LLM）", value=True)
-            note_input = ui.input(label="备注").props("type=textarea")
-            title_input = ui.input(label="标题（可选，默认使用文件名）")
+            # 使用新的组件
+            show_upload_asset_dialog(
+                project_id=project_id,
+                device_id=device_id,
+                project_name=project_name,
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=on_upload_success,
+            )
+        else:
+            # 保留旧代码作为后备
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                ui.label("上传图片资产").classes("text-subtitle1")
+                ui.label(f"项目: {project_name}").classes("text-caption text-grey")
 
-            # 文件选择提示
-            file_info_label = ui.label("尚未选择文件").classes("text-caption text-grey q-mb-sm")
-            status_label = ui.label("").classes("text-caption text-grey")
+                role_select = ui.select(
+                    {
+                        "": "默认角色",
+                        "meter": "仪表(meter)",
+                        "scene_issue": "现场问题(scene_issue)",
+                        "nameplate": "铭牌(nameplate)",
+                        "energy_table": "能耗表(energy_table)",
+                        "runtime_table": "运行表(runtime_table)",
+                    },
+                    value="",
+                    label="内容角色",
+                ).props("dense outlined")
 
-            # 在 Python 端缓存已上传的单个文件内容
-            selected_file: Dict[str, Any] = {"name": None, "content": None, "type": None}
+                auto_route_checkbox = ui.checkbox("自动解析（OCR/LLM）", value=True)
+                note_input = ui.input(label="备注").props("type=textarea")
+                title_input = ui.input(label="标题（可选，默认使用文件名）")
 
-            async def on_file_upload(e: events.UploadEventArguments) -> None:
-                """当浏览器将文件上传到 Python 端时缓存文件内容。
+                # 文件选择提示
+                file_info_label = ui.label("尚未选择文件").classes("text-caption text-grey q-mb-sm")
+                status_label = ui.label("").classes("text-caption text-grey")
 
-                为兼容不同 NiceGUI 版本，依次尝试以下来源：
-                1) e.content  （旧版 API，中是 file-like）
-                2) e.file     （某些版本提供单文件属性）
-                3) e.files[0] （新版 API 提供 FileUpload 列表）
-                """
-                try:
-                    file_bytes: bytes = b""
-                    file_name: Optional[str] = None
-                    file_type: Optional[str] = None
+                # 在 Python 端缓存已上传的单个文件内容
+                selected_file: Dict[str, Any] = {"name": None, "content": None, "type": None}
 
-                    # 1) 旧版：e.content
-                    if hasattr(e, "content") and getattr(e, "content") is not None:
-                        print("[DEBUG] on_file_upload: 使用 e.content 读取")
-                        content_obj = getattr(e, "content")
-                        if hasattr(content_obj, "read"):
-                            result = content_obj.read()
-                            if inspect.iscoroutine(result):
-                                result = await result
-                            file_bytes = result or b""
-                        file_name = getattr(e, "name", None)
-                        file_type = getattr(e, "type", None)
+                async def on_file_upload(e: events.UploadEventArguments) -> None:
+                    """当浏览器将文件上传到 Python 端时缓存文件内容。"""
+                    try:
+                        file_bytes: bytes = b""
+                        file_name: Optional[str] = None
+                        file_type: Optional[str] = None
 
-                    # 2) 可能存在的 e.file 属性
-                    elif hasattr(e, "file") and getattr(e, "file") is not None:
-                        print("[DEBUG] on_file_upload: 使用 e.file 读取")
-                        file_obj = getattr(e, "file")
-                        file_name = getattr(file_obj, "name", None)
-                        file_type = getattr(file_obj, "type", None)
-                        if hasattr(file_obj, "read"):
-                            result = file_obj.read()
-                            if inspect.iscoroutine(result):
-                                result = await result
-                            file_bytes = result or b""
+                        # 1) 旧版：e.content
+                        if hasattr(e, "content") and getattr(e, "content") is not None:
+                            print("[DEBUG] on_file_upload: 使用 e.content 读取")
+                            content_obj = getattr(e, "content")
+                            if hasattr(content_obj, "read"):
+                                result = content_obj.read()
+                                if inspect.iscoroutine(result):
+                                    result = await result
+                                file_bytes = result or b""
+                            file_name = getattr(e, "name", None)
+                            file_type = getattr(e, "type", None)
 
-                    # 3) 新版：e.files 列表
-                    elif hasattr(e, "files"):
-                        files_attr = getattr(e, "files")
-                        print(f"[DEBUG] on_file_upload: e.files 类型={type(files_attr)} 值={files_attr}")
-                        if files_attr:
-                            file_obj = files_attr[0]
+                        # 2) 可能存在的 e.file 属性
+                        elif hasattr(e, "file") and getattr(e, "file") is not None:
+                            print("[DEBUG] on_file_upload: 使用 e.file 读取")
+                            file_obj = getattr(e, "file")
                             file_name = getattr(file_obj, "name", None)
                             file_type = getattr(file_obj, "type", None)
                             if hasattr(file_obj, "read"):
@@ -1292,147 +1300,141 @@ def main_page() -> None:
                                 if inspect.iscoroutine(result):
                                     result = await result
                                 file_bytes = result or b""
+
+                        # 3) 新版：e.files 列表
+                        elif hasattr(e, "files"):
+                            files_attr = getattr(e, "files")
+                            print(f"[DEBUG] on_file_upload: e.files 类型={type(files_attr)} 值={files_attr}")
+                            if files_attr:
+                                file_obj = files_attr[0]
+                                file_name = getattr(file_obj, "name", None)
+                                file_type = getattr(file_obj, "type", None)
+                                if hasattr(file_obj, "read"):
+                                    result = file_obj.read()
+                                    if inspect.iscoroutine(result):
+                                        result = await result
+                                    file_bytes = result or b""
+                            else:
+                                print("[DEBUG] on_file_upload: e.files 为空列表")
                         else:
-                            print("[DEBUG] on_file_upload: e.files 为空列表")
+                            print(f"[DEBUG] on_file_upload: UploadEventArguments 无 content / file / files 属性: {e}")
 
-                    else:
-                        print(f"[DEBUG] on_file_upload: UploadEventArguments 无 content / file / files 属性: {e}")
+                        selected_file["name"] = file_name
+                        selected_file["content"] = file_bytes
+                        selected_file["type"] = file_type
 
-                    selected_file["name"] = file_name
-                    selected_file["content"] = file_bytes
-                    selected_file["type"] = file_type
+                        if file_bytes:
+                            safe_name = file_name or "未命名文件"
+                            file_info_label.text = f"已选择: {safe_name}"
+                            file_info_label.classes("text-caption text-positive q-mb-sm")
+                            print(f"[DEBUG] 已接收到上传文件: {safe_name}, 大小={len(file_bytes)} bytes, type={file_type}")
+                        else:
+                            file_info_label.text = "尚未选择文件"
+                            file_info_label.classes("text-caption text-grey q-mb-sm")
+                            print("[DEBUG] on_file_upload: 未能从事件中读取到任何文件字节")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[DEBUG] on_file_upload 处理异常: {exc}")
 
-                    if file_bytes:
-                        safe_name = file_name or "未命名文件"
-                        file_info_label.text = f"已选择: {safe_name}"
-                        file_info_label.classes("text-caption text-positive q-mb-sm")
-                        print(
-                            f"[DEBUG] 已接收到上传文件: {safe_name}, 大小={len(file_bytes)} bytes, type={file_type}"
-                        )
-                    else:
-                        file_info_label.text = "尚未选择文件"
-                        file_info_label.classes("text-caption text-grey q-mb-sm")
-                        print("[DEBUG] on_file_upload: 未能从事件中读取到任何文件字节")
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[DEBUG] on_file_upload 处理异常: {exc}")
+                # 创建上传组件（auto_upload=True，文件到达 Python 端后触发 on_file_upload）
+                upload_component = ui.upload(
+                    label="选择图片文件",
+                    auto_upload=True,
+                    on_upload=on_file_upload,
+                ).props('accept="image/*"')
 
-            # 创建上传组件（auto_upload=True，文件到达 Python 端后触发 on_file_upload）
-            upload_component = ui.upload(
-                label="选择图片文件",
-                auto_upload=True,
-                on_upload=on_file_upload,
-            ).props('accept="image/*"')
+                async def handle_upload() -> None:
+                    # 使用在 on_file_upload 中缓存的文件内容
+                    if not selected_file.get("content"):
+                        ui.notify("请先选择一个文件并等待上传完成", color="warning")
+                        print("[DEBUG] handle_upload: 未找到已缓存的文件内容")
+                        return
 
-            async def handle_upload() -> None:
-                # 使用在 on_file_upload 中缓存的文件内容
-                if not selected_file.get("content"):
-                    ui.notify("请先选择一个文件并等待上传完成", color="warning")
-                    print("[DEBUG] handle_upload: 未找到已缓存的文件内容")
-                    return
+                    file_name = selected_file.get("name") or "uploaded_image"
+                    file_bytes = selected_file.get("content")
+                    file_mime = selected_file.get("type") or "application/octet-stream"
 
-                file_name = selected_file.get("name") or "uploaded_image"
-                file_bytes = selected_file.get("content")
-                file_mime = selected_file.get("type") or "application/octet-stream"
+                    print(f"[DEBUG] 开始上传文件到后端: {file_name}, size={len(file_bytes)} bytes, type={file_mime}")
+                    status_label.text = "正在上传..."
 
-                print(f"[DEBUG] 开始上传文件到后端: {file_name}, size={len(file_bytes)} bytes, type={file_mime}")
-                status_label.text = "正在上传..."
+                    params: Dict[str, Any] = {
+                        "project_id": project_id,
+                        "source": "pc_upload",
+                        "device_id": device_id,
+                    }
+                    if role_select.value:
+                        params["content_role"] = role_select.value
+                    if auto_route_checkbox.value:
+                        params["auto_route"] = "true"
 
-                params: Dict[str, Any] = {
-                    "project_id": str(project_select.value),
-                    "source": "pc_upload",
-                    "device_id": str(current_device_id),
-                }
-                if role_select.value:
-                    params["content_role"] = role_select.value
-                if auto_route_checkbox.value:
-                    params["auto_route"] = "true"
+                    data = {
+                        "note": note_input.value or "",
+                        "title": title_input.value or file_name,
+                    }
 
-                data = {
-                    "note": note_input.value or "",
-                    "title": title_input.value or file_name,
-                }
+                    files = {
+                        "file": (file_name, file_bytes, file_mime)
+                    }
 
-                files = {
-                    "file": (
-                        file_name,
-                        file_bytes,
-                        file_mime,
-                    )
-                }
+                    try:
+                        async with httpx.AsyncClient(timeout=120.0) as client:
+                            resp = await client.post(
+                                f"{BACKEND_BASE_URL}/assets/upload_image_with_note",
+                                params=params,
+                                data=data,
+                                files=files,
+                            )
+                            resp.raise_for_status()
+                            new_asset = resp.json()
+                    except Exception as exc:  # noqa: BLE001
+                        status_label.text = ""
+                        ui.notify(f"上传失败: {exc}", color="negative")
+                        return
 
-                try:
-                    async with httpx.AsyncClient(timeout=120.0) as client:
-                        resp = await client.post(
-                            f"{BACKEND_BASE_URL}/assets/upload_image_with_note",
-                            params=params,
-                            data=data,
-                            files=files,
-                        )
-                        resp.raise_for_status()
-                        new_asset = resp.json()
-                except Exception as exc:  # noqa: BLE001
+                    enrich_asset(new_asset)
+                    all_assets_for_device.append(new_asset)
+                    apply_asset_filters()
+
                     status_label.text = ""
-                    ui.notify(f"上传失败: {exc}", color="negative")
-                    return
+                    ui.notify("上传成功", color="positive")
+                    # 重置已选择文件状态
+                    selected_file["name"] = None
+                    selected_file["content"] = None
+                    selected_file["type"] = None
+                    try:
+                        upload_component.reset()
+                    except Exception:
+                        pass
+                    dialog.close()
 
-                enrich_asset(new_asset)
-                all_assets_for_device.append(new_asset)
-                apply_asset_filters()
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    confirm_btn = ui.button("确认上传", color="positive")
+                    cancel_btn = ui.button("取消")
 
-                status_label.text = ""
-                ui.notify("上传成功", color="positive")
-                # 重置已选择文件状态
-                selected_file["name"] = None
-                selected_file["content"] = None
-                selected_file["type"] = None
-                try:
-                    upload_component.reset()
-                except Exception:
-                    pass
-                dialog.close()
+                confirm_btn.on_click(handle_upload)
+                cancel_btn.on_click(dialog.close)
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                confirm_btn = ui.button("确认上传", color="positive")
-                cancel_btn = ui.button("取消")
-
-            confirm_btn.on_click(handle_upload)
-            cancel_btn.on_click(dialog.close)
-
-        dialog.open()
+            dialog.open()
 
     async def on_delete_asset_click() -> None:
+        """删除资产点击事件（使用新的对话框组件）"""
         nonlocal selected_asset
         if not selected_asset:
             ui.notify("请先在列表中选择一个资产", color="warning")
             return
 
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            ui.label("删除资产").classes("text-subtitle1")
-            ui.label("此操作会删除资产及其解析结果。")
+        asset_id = selected_asset.get("id") if selected_asset else None
+        if not asset_id:
+            ui.notify("资产ID缺失，无法删除", color="negative")
+            return
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("确认删除", color="negative")
-
-            async def do_delete() -> None:
-                nonlocal selected_asset
-                asset_id = selected_asset.get("id") if selected_asset else None
-                if not asset_id:
-                    ui.notify("资产ID缺失，无法删除", color="negative")
-                    return
-
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id}")
-                        resp.raise_for_status()
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"删除资产失败: {exc}", color="negative")
-                    return
-
+        if UI_COMPONENTS_ENABLED:
+            # 创建适配的回调函数
+            async def on_delete_success(deleted_asset_id: str) -> None:
+                """删除成功后的回调"""
+                nonlocal selected_asset, all_assets_for_device
                 # 从当前设备资产列表中移除该资产
                 remaining: List[Dict[str, Any]] = [
-                    a for a in all_assets_for_device if str(a.get("id")) != str(asset_id)
+                    a for a in all_assets_for_device if str(a.get("id")) != str(deleted_asset_id)
                 ]
                 all_assets_for_device.clear()
                 all_assets_for_device.extend(remaining)
@@ -1440,13 +1442,55 @@ def main_page() -> None:
                 selected_asset = None
                 apply_asset_filters()
 
-                ui.notify("资产已删除", color="positive")
-                dialog.close()
+            # 使用新的组件
+            show_delete_asset_dialog(
+                asset_id=asset_id,
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=on_delete_success,
+            )
+        else:
+            # 保留旧代码作为后备
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                ui.label("删除资产").classes("text-subtitle1")
+                ui.label("此操作会删除资产及其解析结果。")
 
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_delete)
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("确认删除", color="negative")
 
-        dialog.open()
+                async def do_delete() -> None:
+                    nonlocal selected_asset
+                    asset_id_local = selected_asset.get("id") if selected_asset else None
+                    if not asset_id_local:
+                        ui.notify("资产ID缺失，无法删除", color="negative")
+                        return
+
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id_local}")
+                            resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"删除资产失败: {exc}", color="negative")
+                        return
+
+                    # 从当前设备资产列表中移除该资产
+                    remaining: List[Dict[str, Any]] = [
+                        a for a in all_assets_for_device if str(a.get("id")) != str(asset_id_local)
+                    ]
+                    all_assets_for_device.clear()
+                    all_assets_for_device.extend(remaining)
+
+                    selected_asset = None
+                    apply_asset_filters()
+
+                    ui.notify("资产已删除", color="positive")
+                    dialog.close()
+
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_delete)
+
+            dialog.open()
 
     async def on_create_building_click() -> None:
         """创建楼栋点击事件（使用新的对话框组件）"""
