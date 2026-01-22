@@ -12,6 +12,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
 from nicegui import ui
+from desktop.nicegui_app.ui.dialogs import (
+    show_upload_asset_dialog,
+    show_delete_asset_dialog,
+)
 
 
 @dataclass
@@ -163,6 +167,75 @@ async def on_run_ocr_click(
         ui.notify(f"刷新资产详情失败: {exc}", color="negative")
 
     update_detail_func()
+
+
+async def on_upload_asset_click(
+    ctx: AssetUIContext,
+    project_id: str,
+    device_id: str,
+    project_name: str,
+    backend_base_url: str,
+    enrich_asset_func: Callable[[Dict[str, Any]], None],
+    apply_asset_filters_func: Callable[[], None],
+) -> None:
+    """上传资产点击事件处理。
+
+    该函数负责调用上传资产对话框并在上传成功后更新资产列表和过滤结果。
+    """
+
+    async def on_upload_success(new_asset: Dict[str, Any]) -> None:
+        """上传成功后的回调。"""
+        enrich_asset_func(new_asset)
+        if ctx.asset_state.all_assets_for_device is None:
+            ctx.asset_state.all_assets_for_device = []
+        ctx.asset_state.all_assets_for_device.append(new_asset)
+        apply_asset_filters_func()
+
+    show_upload_asset_dialog(
+        project_id=project_id,
+        device_id=device_id,
+        project_name=project_name,
+        backend_base_url=backend_base_url,
+        on_success=on_upload_success,
+    )
+
+
+async def on_delete_asset_click(
+    ctx: AssetUIContext,
+    backend_base_url: str,
+    apply_asset_filters_func: Callable[[], None],
+) -> None:
+    """删除资产点击事件处理。
+
+    该函数基于当前选中的资产，调用删除资产对话框，并在删除成功后
+    更新资产列表和右侧详情状态。
+    """
+
+    selected_asset = ctx.asset_state.selected_asset
+    if not selected_asset:
+        ui.notify("请先在列表中选择一个资产", color="warning")
+        return
+
+    asset_id = selected_asset.get("id") if selected_asset else None
+    if not asset_id:
+        ui.notify("资产ID缺失，无法删除", color="negative")
+        return
+
+    async def on_delete_success(deleted_asset_id: str) -> None:
+        """删除成功后的回调。"""
+        all_assets = ctx.asset_state.all_assets_for_device or []
+        remaining: List[Dict[str, Any]] = [
+            a for a in all_assets if str(a.get("id")) != str(deleted_asset_id)
+        ]
+        ctx.asset_state.all_assets_for_device = remaining
+        ctx.asset_state.selected_asset = None
+        apply_asset_filters_func()
+
+    show_delete_asset_dialog(
+        asset_id=asset_id,
+        backend_base_url=backend_base_url,
+        on_success=on_delete_success,
+    )
 
 
 async def on_run_scene_llm_click(

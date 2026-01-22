@@ -13,6 +13,8 @@ from desktop.nicegui_app.events.asset_events import (
     on_asset_row_click,
     on_run_ocr_click,
     on_run_scene_llm_click,
+    on_upload_asset_click,
+    on_delete_asset_click,
 )
 
 __all__ = [
@@ -21,4 +23,6 @@ __all__ = [
     "on_asset_row_click",
     "on_run_ocr_click",
     "on_run_scene_llm_click",
+    "on_upload_asset_click",
+    "on_delete_asset_click",
 ]

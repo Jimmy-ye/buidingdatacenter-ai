@@ -99,6 +99,8 @@ from desktop.nicegui_app.events import (
     on_asset_row_click as on_asset_row_click_handler,
     on_run_ocr_click as on_run_ocr_click_handler,
     on_run_scene_llm_click as on_run_scene_llm_click_handler,
+    on_upload_asset_click as on_upload_asset_click_handler,
+    on_delete_asset_click as on_delete_asset_click_handler,
 )
 # ======================================================================
 
@@ -840,7 +842,9 @@ def main_page() -> None:
     run_llm_button.on_click(on_run_scene_llm_click)
 
     async def on_upload_asset_click() -> None:
-        """上传资产点击事件（使用新的对话框组件）"""
+        """上传资产点击事件（委托给 events.asset_events.on_upload_asset_click）。"""
+        nonlocal all_assets_for_device
+
         if not project_select.value:
             ui.notify("请先选择项目", color="warning")
             return
@@ -852,51 +856,40 @@ def main_page() -> None:
         device_id = str(current_device_id)
         project_name = project_select.options.get(project_select.value, project_select.value)
 
-        async def on_upload_success(new_asset: Dict[str, Any]) -> None:
-            """上传成功后的回调"""
-            nonlocal all_assets_for_device
-            enrich_asset(new_asset)
-            all_assets_for_device.append(new_asset)
-            apply_asset_filters()
+        # 在调用前，将当前资产列表同步到 state_ref，避免丢失已有资产
+        asset_state_ref.all_assets_for_device = list(all_assets_for_device)
 
-        show_upload_asset_dialog(
+        await on_upload_asset_click_handler(
+            ctx=asset_ui_context,
             project_id=project_id,
             device_id=device_id,
             project_name=project_name,
             backend_base_url=BACKEND_BASE_URL,
-            on_success=on_upload_success,
+            enrich_asset_func=enrich_asset,
+            apply_asset_filters_func=apply_asset_filters,
         )
+
+        # 从 state_ref 同步回旧变量（向后兼容）
+        all_assets_for_device.clear()
+        all_assets_for_device.extend(asset_state_ref.all_assets_for_device or [])
 
     async def on_delete_asset_click() -> None:
-        """删除资产点击事件（使用新的对话框组件）"""
-        nonlocal selected_asset
-        if not selected_asset:
-            ui.notify("请先在列表中选择一个资产", color="warning")
-            return
+        """删除资产点击事件（委托给 events.asset_events.on_delete_asset_click）。"""
+        nonlocal selected_asset, all_assets_for_device
 
-        asset_id = selected_asset.get("id") if selected_asset else None
-        if not asset_id:
-            ui.notify("资产ID缺失，无法删除", color="negative")
-            return
+        # 在调用前，将当前资产列表同步到 state_ref，避免丢失已有资产
+        asset_state_ref.all_assets_for_device = list(all_assets_for_device)
 
-        async def on_delete_success(deleted_asset_id: str) -> None:
-            """删除成功后的回调"""
-            nonlocal selected_asset, all_assets_for_device
-            # 从当前设备资产列表中移除该资产
-            remaining: List[Dict[str, Any]] = [
-                a for a in all_assets_for_device if str(a.get("id")) != str(deleted_asset_id)
-            ]
-            all_assets_for_device.clear()
-            all_assets_for_device.extend(remaining)
-
-            selected_asset = None
-            apply_asset_filters()
-
-        show_delete_asset_dialog(
-            asset_id=asset_id,
+        await on_delete_asset_click_handler(
+            ctx=asset_ui_context,
             backend_base_url=BACKEND_BASE_URL,
-            on_success=on_delete_success,
+            apply_asset_filters_func=apply_asset_filters,
         )
+
+        # 从 state_ref 同步回旧变量（向后兼容）
+        selected_asset = asset_state_ref.selected_asset
+        all_assets_for_device.clear()
+        all_assets_for_device.extend(asset_state_ref.all_assets_for_device or [])
 
     async def on_create_building_click() -> None:
         """创建楼栋点击事件（使用新的对话框组件）"""
