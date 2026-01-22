@@ -11,10 +11,14 @@ from desktop.nicegui_app.events.asset_events import (
     AssetStateRef,
     AssetUIContext,
     on_asset_row_click,
+    on_run_ocr_click,
+    on_run_scene_llm_click,
 )
 
 __all__ = [
     "AssetStateRef",
     "AssetUIContext",
     "on_asset_row_click",
+    "on_run_ocr_click",
+    "on_run_scene_llm_click",
 ]

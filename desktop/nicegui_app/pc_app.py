@@ -97,6 +97,8 @@ from desktop.nicegui_app.events import (
     AssetStateRef,
     AssetUIContext,
     on_asset_row_click as on_asset_row_click_handler,
+    on_run_ocr_click as on_run_ocr_click_handler,
+    on_run_scene_llm_click as on_run_scene_llm_click_handler,
 )
 # ======================================================================
 
@@ -804,78 +806,34 @@ def main_page() -> None:
         )
 
     async def on_run_ocr_click() -> None:
+        """运行 OCR 点击事件（委托给 events.asset_events.on_run_ocr_click）。"""
         nonlocal selected_asset
-        if not selected_asset:
-            ui.notify("请先在列表中选择一个资产", color="warning")
-            return
 
-        modality = str(selected_asset.get("modality") or "").lower()
-        if modality != "image":
-            ui.notify("当前资产不是图片，无法运行 OCR", color="warning")
-            return
+        await on_run_ocr_click_handler(
+            ctx=asset_ui_context,
+            backend_base_url=BACKEND_BASE_URL,
+            get_asset_detail_func=get_asset_detail,
+            enrich_asset_func=enrich_asset,
+            update_detail_func=update_asset_detail,
+        )
 
-        asset_id = selected_asset.get("id")
-        if not asset_id:
-            ui.notify("资产ID缺失，无法运行 OCR", color="negative")
-            return
-
-        inference_status_label.text = "OCR 处理中……"
-
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(f"{BACKEND_BASE_URL}/assets/{asset_id}/parse_image")
-                resp.raise_for_status()
-        except Exception as exc:
-            inference_status_label.text = "OCR 失败"
-            ui.notify(f"运行 OCR 失败: {exc}", color="negative")
-            return
-
-        try:
-            detail = await get_asset_detail(str(asset_id))
-            enrich_asset(detail)
-            selected_asset = detail
-        except Exception as exc:
-            ui.notify(f"刷新资产详情失败: {exc}", color="negative")
-
-        update_asset_detail()
+        # 同步 state_ref 到旧变量（向后兼容）
+        selected_asset = asset_state_ref.selected_asset
 
     async def on_run_scene_llm_click() -> None:
+        """运行现场问题 LLM 点击事件（委托给 events.asset_events.on_run_scene_llm_click）。"""
         nonlocal selected_asset
-        if not selected_asset:
-            ui.notify("请先在列表中选择一个资产", color="warning")
-            return
 
-        modality = str(selected_asset.get("modality") or "").lower()
-        role = str(selected_asset.get("content_role") or "").lower()
-        if modality != "image":
-            ui.notify("当前资产不是图片，无法提交 LLM 分析", color="warning")
-            return
-        if role not in {"scene_issue", "meter"}:
-            ui.notify("建议对角色为 scene_issue 或 meter 的图片运行现场问题分析", color="warning")
+        await on_run_scene_llm_click_handler(
+            ctx=asset_ui_context,
+            backend_base_url=BACKEND_BASE_URL,
+            get_asset_detail_func=get_asset_detail,
+            enrich_asset_func=enrich_asset,
+            update_detail_func=update_asset_detail,
+        )
 
-        asset_id = selected_asset.get("id")
-        if not asset_id:
-            ui.notify("资产ID缺失，无法提交 LLM 分析", color="negative")
-            return
-
-        inference_status_label.text = "已提交到 LLM 管线，等待分析结果……"
-
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(f"{BACKEND_BASE_URL}/assets/{asset_id}/route_image")
-                resp.raise_for_status()
-        except Exception as exc:
-            ui.notify(f"提交 LLM 分析失败: {exc}", color="negative")
-            return
-
-        try:
-            detail = await get_asset_detail(str(asset_id))
-            enrich_asset(detail)
-            selected_asset = detail
-        except Exception as exc:
-            ui.notify(f"刷新资产详情失败: {exc}", color="negative")
-
-        update_asset_detail()
+        # 同步 state_ref 到旧变量（向后兼容）
+        selected_asset = asset_state_ref.selected_asset
 
     # 绑定 OCR / LLM 控制台按钮事件（需在两个 handler 定义之后）
     run_ocr_button.on_click(on_run_ocr_click)

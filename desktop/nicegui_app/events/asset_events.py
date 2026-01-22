@@ -8,9 +8,10 @@
 """
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-import nicegui as ui
+import httpx
+from nicegui import ui
 
 
 @dataclass
@@ -21,7 +22,7 @@ class AssetStateRef:
     使用容器而不是直接值，确保事件处理函数中的修改对外部可见。
     """
     selected_asset: Optional[Dict[str, Any]] = None
-    all_assets_for_device: list[Dict[str, Any]] = None
+    all_assets_for_device: Optional[List[Dict[str, Any]]] = None
 
     def __post_init__(self):
         if self.all_assets_for_device is None:
@@ -113,3 +114,106 @@ async def on_asset_row_click(
         except Exception:
             # 预览失败不影响基本详情展示
             pass
+
+
+async def on_run_ocr_click(
+    ctx: AssetUIContext,
+    backend_base_url: str,
+    get_asset_detail_func: Callable[[str], Awaitable[Dict[str, Any]]],
+    enrich_asset_func: Callable[[Dict[str, Any]], None],
+    update_detail_func: Callable[[], None],
+) -> None:
+    """运行 OCR 的点击事件处理。
+
+    该函数基于当前选中的资产，调用后端 /assets/{asset_id}/parse_image 接口，
+    并在完成后刷新资产详情和右侧详情面板。
+    """
+
+    selected_asset = ctx.asset_state.selected_asset
+    if not selected_asset:
+        ui.notify("请先在列表中选择一个资产", color="warning")
+        return
+
+    modality = str(selected_asset.get("modality") or "").lower()
+    if modality != "image":
+        ui.notify("当前资产不是图片，无法运行 OCR", color="warning")
+        return
+
+    asset_id = selected_asset.get("id")
+    if not asset_id:
+        ui.notify("资产ID缺失，无法运行 OCR", color="negative")
+        return
+
+    ctx.inference_status_label.text = "OCR 处理中……"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(f"{backend_base_url}/assets/{asset_id}/parse_image")
+            resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        ctx.inference_status_label.text = "OCR 失败"
+        ui.notify(f"运行 OCR 失败: {exc}", color="negative")
+        return
+
+    try:
+        detail = await get_asset_detail_func(str(asset_id))
+        enrich_asset_func(detail)
+        ctx.asset_state.selected_asset = detail
+    except Exception as exc:  # noqa: BLE001
+        ui.notify(f"刷新资产详情失败: {exc}", color="negative")
+
+    update_detail_func()
+
+
+async def on_run_scene_llm_click(
+    ctx: AssetUIContext,
+    backend_base_url: str,
+    get_asset_detail_func: Callable[[str], Awaitable[Dict[str, Any]]],
+    enrich_asset_func: Callable[[Dict[str, Any]], None],
+    update_detail_func: Callable[[], None],
+) -> None:
+    """运行现场问题 LLM 的点击事件处理。
+
+    该函数基于当前选中的资产，调用后端 /assets/{asset_id}/route_image 接口，
+    将图片资产提交到 LLM 管线，并在完成后刷新资产详情和右侧详情面板。
+    """
+
+    selected_asset = ctx.asset_state.selected_asset
+    if not selected_asset:
+        ui.notify("请先在列表中选择一个资产", color="warning")
+        return
+
+    modality = str(selected_asset.get("modality") or "").lower()
+    role = str(selected_asset.get("content_role") or "").lower()
+    if modality != "image":
+        ui.notify("当前资产不是图片，无法提交 LLM 分析", color="warning")
+        return
+    if role not in {"scene_issue", "meter"}:
+        ui.notify(
+            "建议对角色为 scene_issue 或 meter 的图片运行现场问题分析",
+            color="warning",
+        )
+
+    asset_id = selected_asset.get("id")
+    if not asset_id:
+        ui.notify("资产ID缺失，无法提交 LLM 分析", color="negative")
+        return
+
+    ctx.inference_status_label.text = "已提交到 LLM 管线，等待分析结果……"
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(f"{backend_base_url}/assets/{asset_id}/route_image")
+            resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        ui.notify(f"提交 LLM 分析失败: {exc}", color="negative")
+        return
+
+    try:
+        detail = await get_asset_detail_func(str(asset_id))
+        enrich_asset_func(detail)
+        ctx.asset_state.selected_asset = detail
+    except Exception as exc:  # noqa: BLE001
+        ui.notify(f"刷新资产详情失败: {exc}", color="negative")
+
+    update_detail_func()
