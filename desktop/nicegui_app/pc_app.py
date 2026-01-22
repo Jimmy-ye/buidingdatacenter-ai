@@ -27,7 +27,7 @@ BASE_ASSET_DIR = os.path.abspath(SETTINGS.local_storage_dir)
 app.add_static_files(ASSET_WEB_PREFIX, BASE_ASSET_DIR)
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.4-refactor-stage1"
+UI_VERSION = "PC UI v0.3.5-refactor-stage2"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -39,6 +39,20 @@ except ImportError:
     # 如果导入失败，创建一个空对象（向后兼容）
     backend_client = None
     logger = None
+# ======================================================================
+
+# ==================== 新增：状态管理（重构阶段 2）====================
+# 使用集中式状态管理替代闭包变量
+# 新旧状态可以共存，逐步迁移
+try:
+    from desktop.nicegui_app.state.store import app_state, get_current_project
+    STATE_MANAGEMENT_ENABLED = True
+except ImportError:
+    # 如果导入失败，禁用状态管理
+    app_state = None
+    STATE_MANAGEMENT_ENABLED = False
+    def get_current_project():
+        return None
 # ======================================================================
 
 
@@ -356,6 +370,7 @@ def main_page() -> None:
                             ocr_text_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
                             llm_summary_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
 
+    # ==================== 旧状态变量（向后兼容）====================
     projects_cache: List[Dict[str, Any]] = []
     full_tree_nodes: List[Dict[str, Any]] = []
     selected_asset: Optional[Dict[str, Any]] = None
@@ -363,6 +378,66 @@ def main_page() -> None:
     current_device_id: Optional[str] = None
     current_tree_node_type: Optional[str] = None
     current_tree_node_id: Optional[str] = None
+    # ======================================================================
+
+    # ==================== 新增：状态同步适配层（重构阶段 2）====================
+    if STATE_MANAGEMENT_ENABLED and app_state:
+        def sync_state_to_old_vars():
+            """
+            将新状态同步到旧变量（兼容层）
+
+            确保使用旧变量的代码仍然可以正常工作
+            """
+            nonlocal projects_cache, full_tree_nodes, selected_asset
+            nonlocal all_assets_for_device, current_device_id
+            nonlocal current_tree_node_type, current_tree_node_id
+
+            # 同步项目状态
+            projects_cache = app_state.project.projects
+
+            # 同步树状态
+            full_tree_nodes = app_state.tree.all_nodes
+            current_tree_node_type = app_state.tree.selected_node_type
+            current_tree_node_id = app_state.tree.selected_node_id
+
+            # 同步资产状态
+            all_assets_for_device = app_state.asset.all_assets
+            selected_asset = app_state.asset.selected_asset
+            current_device_id = app_state.asset.current_device_id
+
+        def sync_old_vars_to_state():
+            """
+            将旧变量同步到新状态（兼容层）
+
+            当旧变量被修改时，同步更新新状态
+            """
+            if not app_state:
+                return
+
+            # 同步项目状态
+            app_state.project.set_projects(projects_cache)
+            if project_select.value:
+                app_state.project.set_current_project(project_select.value)
+
+            # 同步树状态
+            app_state.tree.set_nodes(full_tree_nodes)
+            app_state.tree.set_selected_node(current_tree_node_type, current_tree_node_id)
+
+            # 同步资产状态
+            app_state.asset.set_assets(all_assets_for_device)
+            app_state.asset.set_selected_asset(selected_asset)
+            app_state.asset.current_device_id = current_device_id
+
+        # 初始化时同步一次
+        sync_state_to_old_vars()
+    else:
+        # 如果状态管理未启用，创建空函数
+        def sync_state_to_old_vars():
+            pass
+
+        def sync_old_vars_to_state():
+            pass
+    # ======================================================================
 
     def update_inference_status() -> None:
         nonlocal selected_asset
