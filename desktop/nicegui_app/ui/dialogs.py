@@ -245,6 +245,66 @@ def show_edit_project_dialog(
     return dialog
 
 
+def show_delete_project_dialog(
+    project: Dict[str, Any],
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable[[None], None]] = None,
+) -> None:
+    """
+    显示删除项目对话框（软删除）
+
+    Args:
+        project: 项目数据
+        backend_base_url: 后端 API 基础 URL
+        on_success: 成功回调
+    """
+    import httpx
+    from typing import Dict as TypingDict, Any as TypingAny
+
+    dialog = ui.dialog()
+    with dialog, ui.card():
+        ui.label("删除项目（软删除）").classes("text-subtitle1")
+        ui.label("此操作会将项目标记为已删除，但不会物理删除数据库记录。")
+        reason_input = ui.input(label="删除原因")
+        operator_input = ui.input(label="操作人")
+
+        with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+            cancel_btn = ui.button("取消")
+            confirm_btn = ui.button("确认删除", color="negative")
+
+        async def do_delete() -> None:
+            project_id = project.get("id")
+            params: TypingDict[str, TypingAny] = {}
+            if reason_input.value:
+                params["reason"] = reason_input.value
+
+            headers: TypingDict[str, str] = {}
+            if operator_input.value:
+                headers["operator"] = str(operator_input.value)
+
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.delete(
+                        f"{backend_base_url}/projects/{project_id}",
+                        params=params,
+                        headers=headers or None,
+                    )
+                    resp.raise_for_status()
+            except Exception as exc:
+                ui.notify(f"删除项目失败: {exc}", color="negative")
+                return
+
+            dialog.close()
+            ui.notify("项目已删除", color="positive")
+            if on_success:
+                await on_success(None)
+
+        cancel_btn.on_click(dialog.close)
+        confirm_btn.on_click(do_delete)
+
+    dialog.open()
+
+
 # ==================== 工程结构节点对话框组件 ====================
 
 class EngineeringNodeDialog:

@@ -63,6 +63,7 @@ from desktop.nicegui_app.ui.dialogs import (
     AssetDialog,
     show_create_project_dialog,
     show_edit_project_dialog,
+    show_delete_project_dialog,
     show_create_building_dialog,
     show_edit_building_dialog,
     show_delete_building_dialog,
@@ -703,25 +704,10 @@ def main_page() -> None:
     async def on_asset_row_click(e: Any) -> None:
         nonlocal selected_asset
 
-        if UI_COMPONENTS_ENABLED and extract_asset_id_from_row_click is not None:
-            # 使用新的组件化行点击处理逻辑
-            asset_id = extract_asset_id_from_row_click(e)
-            if asset_id is None:
-                return
-        else:
-            # 保留旧代码作为向后兼容
-            row = e.args
-            # 兼容 emit(row) 或 emit([row]) 两种情况
-            if isinstance(row, list):
-                if not row:
-                    return
-                row = row[0]
-            if not isinstance(row, dict):
-                return
-
-            asset_id = row.get("id")
-            if not asset_id:
-                return
+        # 使用新的组件化行点击处理逻辑
+        asset_id = extract_asset_id_from_row_click(e)
+        if asset_id is None:
+            return
 
         try:
             detail = await get_asset_detail(str(asset_id))
@@ -759,73 +745,10 @@ def main_page() -> None:
 
     async def on_create_project_click() -> None:
         """创建项目点击事件（使用新的对话框组件）"""
-        if UI_COMPONENTS_ENABLED:
-            # 使用新的组件
-            show_create_project_dialog(
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=reload_projects_and_tree,
-            )
-        else:
-            # 保留旧代码作为后备
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                name_input = ui.input(label="项目名称")
-                client_input = ui.input(label="客户")
-                location_input = ui.input(label="位置")
-                type_input = ui.input(label="类型")
-                status_input = ui.input(label="状态")
-                env_select = ui.select(
-                    {
-                        "": "默认环境",
-                        "dev": "开发环境",
-                        "test": "测试环境",
-                        "prod": "生产环境",
-                    },
-                    value="",
-                    label="环境标签",
-                ).props("dense outlined")
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    cancel_btn = ui.button("取消")
-                    confirm_btn = ui.button("保存", color="primary")
-
-                async def do_create() -> None:
-                    name = (name_input.value or "").strip()
-                    if not name:
-                        ui.notify("项目名称不能为空", color="negative")
-                        return
-
-                    tags: Dict[str, Any] = {}
-                    if env_select.value:
-                        tags["environment"] = env_select.value
-
-                    payload: Dict[str, Any] = {
-                        "name": name,
-                        "client": client_input.value or None,
-                        "location": location_input.value or None,
-                        "type": type_input.value or None,
-                        "status": status_input.value or None,
-                        "tags": tags or None,
-                    }
-
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.post(f"{BACKEND_BASE_URL}/projects/", json=payload)
-                            resp.raise_for_status()
-                            data = resp.json()
-                            project_id = data.get("id")
-                    except Exception as exc:  # noqa: BLE001
-                        ui.notify(f"创建项目失败: {exc}", color="negative")
-                        return
-
-                    dialog.close()
-                    ui.notify("项目创建成功", color="positive")
-                    await reload_projects_and_tree(str(project_id) if project_id else None)
-
-                cancel_btn.on_click(dialog.close)
-                confirm_btn.on_click(do_create)
-
-            dialog.open()
+        show_create_project_dialog(
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_projects_and_tree,
+        )
 
     async def on_edit_project_click() -> None:
         """编辑项目点击事件（使用新的对话框组件）"""
@@ -834,129 +757,24 @@ def main_page() -> None:
             ui.notify("请先选择项目", color="warning")
             return
 
-        if UI_COMPONENTS_ENABLED:
-            # 使用新的组件
-            show_edit_project_dialog(
-                project=project,
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=reload_projects_and_tree,
-            )
-        else:
-            # 保留旧代码作为后备
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                name_input = ui.input(label="项目名称", value=project.get("name") or "")
-                client_input = ui.input(label="客户", value=project.get("client") or "")
-                location_input = ui.input(label="位置", value=project.get("location") or "")
-                type_input = ui.input(label="类型", value=project.get("type") or "")
-                status_input = ui.input(label="状态", value=project.get("status") or "")
-
-                tags = project.get("tags") or {}
-                current_env = tags.get("environment") or ""
-                env_select = ui.select(
-                    {
-                        "": "默认环境",
-                        "dev": "开发环境",
-                        "test": "测试环境",
-                        "prod": "生产环境",
-                    },
-                    value=current_env,
-                    label="环境标签",
-                ).props("dense outlined")
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    cancel_btn = ui.button("取消")
-                    confirm_btn = ui.button("保存", color="primary")
-
-                async def do_update() -> None:
-                    name = (name_input.value or "").strip()
-                    if not name:
-                        ui.notify("项目名称不能为空", color="negative")
-                        return
-
-                    update_tags: Dict[str, Any] = dict(tags)
-                    if env_select.value:
-                        update_tags["environment"] = env_select.value
-                    else:
-                        update_tags.pop("environment", None)
-
-                    payload: Dict[str, Any] = {
-                        "name": name,
-                        "client": client_input.value or None,
-                        "location": location_input.value or None,
-                        "type": type_input.value or None,
-                        "status": status_input.value or None,
-                        "tags": update_tags or None,
-                    }
-
-                    project_id = project.get("id")
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.patch(
-                                f"{BACKEND_BASE_URL}/projects/{project_id}",
-                                json=payload,
-                            )
-                            resp.raise_for_status()
-                    except Exception as exc:  # noqa: BLE001
-                        ui.notify(f"更新项目失败: {exc}", color="negative")
-                        return
-
-                    dialog.close()
-                    ui.notify("项目已更新", color="positive")
-                    await reload_projects_and_tree(str(project_id) if project_id else None)
-
-                cancel_btn.on_click(dialog.close)
-                confirm_btn.on_click(do_update)
-
-            dialog.open()
+        show_edit_project_dialog(
+            project=project,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_projects_and_tree,
+        )
 
     async def on_delete_project_click() -> None:
+        """删除项目点击事件（使用新的对话框组件）"""
         project = get_current_project()
         if not project:
             ui.notify("请先选择项目", color="warning")
             return
 
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            ui.label("删除项目（软删除）").classes("text-subtitle1")
-            ui.label("此操作会将项目标记为已删除，但不会物理删除数据库记录。")
-            reason_input = ui.input(label="删除原因")
-            operator_input = ui.input(label="操作人")
-
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("确认删除", color="negative")
-
-            async def do_delete() -> None:
-                project_id = project.get("id")
-                params: Dict[str, Any] = {}
-                if reason_input.value:
-                    params["reason"] = reason_input.value
-
-                headers: Dict[str, str] = {}
-                if operator_input.value:
-                    headers["operator"] = str(operator_input.value)
-
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.delete(
-                            f"{BACKEND_BASE_URL}/projects/{project_id}",
-                            params=params,
-                            headers=headers or None,
-                        )
-                        resp.raise_for_status()
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"删除项目失败: {exc}", color="negative")
-                    return
-
-                dialog.close()
-                ui.notify("项目已删除", color="positive")
-                await reload_projects_and_tree(None)
-
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_delete)
-
-        dialog.open()
+        show_delete_project_dialog(
+            project=project,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_projects_and_tree,
+        )
 
     async def on_run_ocr_click() -> None:
         nonlocal selected_asset
@@ -1049,198 +867,20 @@ def main_page() -> None:
         device_id = str(current_device_id)
         project_name = project_select.options.get(project_select.value, project_select.value)
 
-        if UI_COMPONENTS_ENABLED:
-            # 创建适配的回调函数
-            async def on_upload_success(new_asset: Dict[str, Any]) -> None:
-                """上传成功后的回调"""
-                nonlocal all_assets_for_device
-                enrich_asset(new_asset)
-                all_assets_for_device.append(new_asset)
-                apply_asset_filters()
+        async def on_upload_success(new_asset: Dict[str, Any]) -> None:
+            """上传成功后的回调"""
+            nonlocal all_assets_for_device
+            enrich_asset(new_asset)
+            all_assets_for_device.append(new_asset)
+            apply_asset_filters()
 
-            # 使用新的组件
-            show_upload_asset_dialog(
-                project_id=project_id,
-                device_id=device_id,
-                project_name=project_name,
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=on_upload_success,
-            )
-        else:
-            # 保留旧代码作为后备
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                ui.label("上传图片资产").classes("text-subtitle1")
-                ui.label(f"项目: {project_name}").classes("text-caption text-grey")
-
-                role_select = ui.select(
-                    {
-                        "": "默认角色",
-                        "meter": "仪表(meter)",
-                        "scene_issue": "现场问题(scene_issue)",
-                        "nameplate": "铭牌(nameplate)",
-                        "energy_table": "能耗表(energy_table)",
-                        "runtime_table": "运行表(runtime_table)",
-                    },
-                    value="",
-                    label="内容角色",
-                ).props("dense outlined")
-
-                auto_route_checkbox = ui.checkbox("自动解析（OCR/LLM）", value=True)
-                note_input = ui.input(label="备注").props("type=textarea")
-                title_input = ui.input(label="标题（可选，默认使用文件名）")
-
-                # 文件选择提示
-                file_info_label = ui.label("尚未选择文件").classes("text-caption text-grey q-mb-sm")
-                status_label = ui.label("").classes("text-caption text-grey")
-
-                # 在 Python 端缓存已上传的单个文件内容
-                selected_file: Dict[str, Any] = {"name": None, "content": None, "type": None}
-
-                async def on_file_upload(e: events.UploadEventArguments) -> None:
-                    """当浏览器将文件上传到 Python 端时缓存文件内容。"""
-                    try:
-                        file_bytes: bytes = b""
-                        file_name: Optional[str] = None
-                        file_type: Optional[str] = None
-
-                        # 1) 旧版：e.content
-                        if hasattr(e, "content") and getattr(e, "content") is not None:
-                            print("[DEBUG] on_file_upload: 使用 e.content 读取")
-                            content_obj = getattr(e, "content")
-                            if hasattr(content_obj, "read"):
-                                result = content_obj.read()
-                                if inspect.iscoroutine(result):
-                                    result = await result
-                                file_bytes = result or b""
-                            file_name = getattr(e, "name", None)
-                            file_type = getattr(e, "type", None)
-
-                        # 2) 可能存在的 e.file 属性
-                        elif hasattr(e, "file") and getattr(e, "file") is not None:
-                            print("[DEBUG] on_file_upload: 使用 e.file 读取")
-                            file_obj = getattr(e, "file")
-                            file_name = getattr(file_obj, "name", None)
-                            file_type = getattr(file_obj, "type", None)
-                            if hasattr(file_obj, "read"):
-                                result = file_obj.read()
-                                if inspect.iscoroutine(result):
-                                    result = await result
-                                file_bytes = result or b""
-
-                        # 3) 新版：e.files 列表
-                        elif hasattr(e, "files"):
-                            files_attr = getattr(e, "files")
-                            print(f"[DEBUG] on_file_upload: e.files 类型={type(files_attr)} 值={files_attr}")
-                            if files_attr:
-                                file_obj = files_attr[0]
-                                file_name = getattr(file_obj, "name", None)
-                                file_type = getattr(file_obj, "type", None)
-                                if hasattr(file_obj, "read"):
-                                    result = file_obj.read()
-                                    if inspect.iscoroutine(result):
-                                        result = await result
-                                    file_bytes = result or b""
-                            else:
-                                print("[DEBUG] on_file_upload: e.files 为空列表")
-                        else:
-                            print(f"[DEBUG] on_file_upload: UploadEventArguments 无 content / file / files 属性: {e}")
-
-                        selected_file["name"] = file_name
-                        selected_file["content"] = file_bytes
-                        selected_file["type"] = file_type
-
-                        if file_bytes:
-                            safe_name = file_name or "未命名文件"
-                            file_info_label.text = f"已选择: {safe_name}"
-                            file_info_label.classes("text-caption text-positive q-mb-sm")
-                            print(f"[DEBUG] 已接收到上传文件: {safe_name}, 大小={len(file_bytes)} bytes, type={file_type}")
-                        else:
-                            file_info_label.text = "尚未选择文件"
-                            file_info_label.classes("text-caption text-grey q-mb-sm")
-                            print("[DEBUG] on_file_upload: 未能从事件中读取到任何文件字节")
-                    except Exception as exc:  # noqa: BLE001
-                        print(f"[DEBUG] on_file_upload 处理异常: {exc}")
-
-                # 创建上传组件（auto_upload=True，文件到达 Python 端后触发 on_file_upload）
-                upload_component = ui.upload(
-                    label="选择图片文件",
-                    auto_upload=True,
-                    on_upload=on_file_upload,
-                ).props('accept="image/*"')
-
-                async def handle_upload() -> None:
-                    # 使用在 on_file_upload 中缓存的文件内容
-                    if not selected_file.get("content"):
-                        ui.notify("请先选择一个文件并等待上传完成", color="warning")
-                        print("[DEBUG] handle_upload: 未找到已缓存的文件内容")
-                        return
-
-                    file_name = selected_file.get("name") or "uploaded_image"
-                    file_bytes = selected_file.get("content")
-                    file_mime = selected_file.get("type") or "application/octet-stream"
-
-                    print(f"[DEBUG] 开始上传文件到后端: {file_name}, size={len(file_bytes)} bytes, type={file_mime}")
-                    status_label.text = "正在上传..."
-
-                    params: Dict[str, Any] = {
-                        "project_id": project_id,
-                        "source": "pc_upload",
-                        "device_id": device_id,
-                    }
-                    if role_select.value:
-                        params["content_role"] = role_select.value
-                    if auto_route_checkbox.value:
-                        params["auto_route"] = "true"
-
-                    data = {
-                        "note": note_input.value or "",
-                        "title": title_input.value or file_name,
-                    }
-
-                    files = {
-                        "file": (file_name, file_bytes, file_mime)
-                    }
-
-                    try:
-                        async with httpx.AsyncClient(timeout=120.0) as client:
-                            resp = await client.post(
-                                f"{BACKEND_BASE_URL}/assets/upload_image_with_note",
-                                params=params,
-                                data=data,
-                                files=files,
-                            )
-                            resp.raise_for_status()
-                            new_asset = resp.json()
-                    except Exception as exc:  # noqa: BLE001
-                        status_label.text = ""
-                        ui.notify(f"上传失败: {exc}", color="negative")
-                        return
-
-                    enrich_asset(new_asset)
-                    all_assets_for_device.append(new_asset)
-                    apply_asset_filters()
-
-                    status_label.text = ""
-                    ui.notify("上传成功", color="positive")
-                    # 重置已选择文件状态
-                    selected_file["name"] = None
-                    selected_file["content"] = None
-                    selected_file["type"] = None
-                    try:
-                        upload_component.reset()
-                    except Exception:
-                        pass
-                    dialog.close()
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    confirm_btn = ui.button("确认上传", color="positive")
-                    cancel_btn = ui.button("取消")
-
-                confirm_btn.on_click(handle_upload)
-                cancel_btn.on_click(dialog.close)
-
-            dialog.open()
+        show_upload_asset_dialog(
+            project_id=project_id,
+            device_id=device_id,
+            project_name=project_name,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=on_upload_success,
+        )
 
     async def on_delete_asset_click() -> None:
         """删除资产点击事件（使用新的对话框组件）"""
@@ -1254,70 +894,24 @@ def main_page() -> None:
             ui.notify("资产ID缺失，无法删除", color="negative")
             return
 
-        if UI_COMPONENTS_ENABLED:
-            # 创建适配的回调函数
-            async def on_delete_success(deleted_asset_id: str) -> None:
-                """删除成功后的回调"""
-                nonlocal selected_asset, all_assets_for_device
-                # 从当前设备资产列表中移除该资产
-                remaining: List[Dict[str, Any]] = [
-                    a for a in all_assets_for_device if str(a.get("id")) != str(deleted_asset_id)
-                ]
-                all_assets_for_device.clear()
-                all_assets_for_device.extend(remaining)
+        async def on_delete_success(deleted_asset_id: str) -> None:
+            """删除成功后的回调"""
+            nonlocal selected_asset, all_assets_for_device
+            # 从当前设备资产列表中移除该资产
+            remaining: List[Dict[str, Any]] = [
+                a for a in all_assets_for_device if str(a.get("id")) != str(deleted_asset_id)
+            ]
+            all_assets_for_device.clear()
+            all_assets_for_device.extend(remaining)
 
-                selected_asset = None
-                apply_asset_filters()
+            selected_asset = None
+            apply_asset_filters()
 
-            # 使用新的组件
-            show_delete_asset_dialog(
-                asset_id=asset_id,
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=on_delete_success,
-            )
-        else:
-            # 保留旧代码作为后备
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                ui.label("删除资产").classes("text-subtitle1")
-                ui.label("此操作会删除资产及其解析结果。")
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    cancel_btn = ui.button("取消")
-                    confirm_btn = ui.button("确认删除", color="negative")
-
-                async def do_delete() -> None:
-                    nonlocal selected_asset
-                    asset_id_local = selected_asset.get("id") if selected_asset else None
-                    if not asset_id_local:
-                        ui.notify("资产ID缺失，无法删除", color="negative")
-                        return
-
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id_local}")
-                            resp.raise_for_status()
-                    except Exception as exc:  # noqa: BLE001
-                        ui.notify(f"删除资产失败: {exc}", color="negative")
-                        return
-
-                    # 从当前设备资产列表中移除该资产
-                    remaining: List[Dict[str, Any]] = [
-                        a for a in all_assets_for_device if str(a.get("id")) != str(asset_id_local)
-                    ]
-                    all_assets_for_device.clear()
-                    all_assets_for_device.extend(remaining)
-
-                    selected_asset = None
-                    apply_asset_filters()
-
-                    ui.notify("资产已删除", color="positive")
-                    dialog.close()
-
-                cancel_btn.on_click(dialog.close)
-                confirm_btn.on_click(do_delete)
-
-            dialog.open()
+        show_delete_asset_dialog(
+            asset_id=asset_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=on_delete_success,
+        )
 
     async def on_create_building_click() -> None:
         """创建楼栋点击事件（使用新的对话框组件）"""
@@ -1328,82 +922,11 @@ def main_page() -> None:
 
         project_id = project.get("id")
 
-        if UI_COMPONENTS_ENABLED:
-            # 使用新的组件
-            show_create_building_dialog(
-                project_id=project_id,
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=reload_tree,
-            )
-        else:
-            # 保留旧代码作为后备
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                ui.label("新建楼栋").classes("text-subtitle1")
-
-                name_input = ui.input(label="楼栋名称")
-                usage_input = ui.input(label="用途（可选）")
-                floor_area_input = ui.input(label="建筑面积 m²（可选）")
-                gfa_area_input = ui.input(label="GFA 面积 m²（可选）")
-                year_built_input = ui.input(label="建成年份（可选）")
-                tags_input = ui.input(label="标签（逗号分隔，可选）")
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    cancel_btn = ui.button("取消")
-                    confirm_btn = ui.button("保存", color="primary")
-
-                async def do_create() -> None:
-                    name = (name_input.value or "").strip()
-                    if not name:
-                        ui.notify("楼栋名称不能为空", color="negative")
-                        return
-
-                    # 使用辅助函数或内嵌函数
-                    if HELPERS_ENABLED and helper_parse_float is not None:
-                        parse_float_local = helper_parse_float
-                    else:
-                        def parse_float_local(value: Any) -> Optional[float]:
-                            try:
-                                text = str(value).strip()
-                                return float(text) if text else None
-                            except Exception:
-                                return None
-
-                    floor_area = parse_float_local(floor_area_input.value)
-                    gfa_area = parse_float_local(gfa_area_input.value)
-                    year_built = parse_float_local(year_built_input.value)
-
-                    tags_raw = (tags_input.value or "").strip()
-                    tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
-
-                    payload: Dict[str, Any] = {
-                        "name": name,
-                        "usage_type": usage_input.value or None,
-                        "floor_area": floor_area,
-                        "gfa_area": gfa_area,
-                        "year_built": year_built,
-                        "tags": tags_list or None,
-                    }
-
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.post(
-                                f"{BACKEND_BASE_URL}/projects/{project_id}/buildings",
-                                json=payload,
-                            )
-                            resp.raise_for_status()
-                    except Exception as exc:  # noqa: BLE001
-                        ui.notify(f"创建楼栋失败: {exc}", color="negative")
-                        return
-
-                    dialog.close()
-                    ui.notify("楼栋创建成功", color="positive")
-                    await reload_tree()
-
-                cancel_btn.on_click(dialog.close)
-                confirm_btn.on_click(do_create)
-
-            dialog.open()
+        show_create_building_dialog(
+            project_id=project_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_tree,
+        )
 
     async def on_edit_node_click() -> None:
         """编辑楼栋点击事件（使用新的对话框组件）"""
@@ -1413,113 +936,11 @@ def main_page() -> None:
 
         building_id = current_tree_node_id
 
-        if UI_COMPONENTS_ENABLED:
-            # 使用新的组件
-            show_edit_building_dialog(
-                building_id=building_id,
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=reload_tree,
-            )
-        else:
-            # 保留旧代码作为后备
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    resp = await client.get(f"{BACKEND_BASE_URL}/buildings/{building_id}")
-                    resp.raise_for_status()
-                    data = resp.json()
-            except Exception as exc:  # noqa: BLE001
-                ui.notify(f"加载楼栋信息失败: {exc}", color="negative")
-                return
-
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                ui.label("编辑楼栋").classes("text-subtitle1")
-
-                name_input = ui.input(label="楼栋名称", value=data.get("name") or "")
-                usage_input = ui.input(label="用途（可选）", value=data.get("usage_type") or "")
-
-                # 使用辅助函数或内嵌函数
-                if HELPERS_ENABLED and helper_format_float is not None:
-                    fmt_float_local = helper_format_float
-                else:
-                    def fmt_float_local(v: Any) -> str:
-                        return "" if v is None else str(v)
-
-                floor_area_input = ui.input(
-                    label="建筑面积 m²（可选）",
-                    value=fmt_float_local(data.get("floor_area")),
-                )
-                gfa_area_input = ui.input(
-                    label="GFA 面积 m²（可选）",
-                    value=fmt_float_local(data.get("gfa_area")),
-                )
-                year_built_input = ui.input(
-                    label="建成年份（可选）",
-                    value=fmt_float_local(data.get("year_built")),
-                )
-
-                tags_value = ""
-                tags_list = data.get("tags") or []
-                if isinstance(tags_list, list):
-                    tags_value = ",".join(str(t) for t in tags_list)
-                tags_input = ui.input(label="标签（逗号分隔，可选）", value=tags_value)
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    cancel_btn = ui.button("取消")
-                    confirm_btn = ui.button("保存", color="primary")
-
-                async def do_update() -> None:
-                    name = (name_input.value or "").strip()
-                    if not name:
-                        ui.notify("楼栋名称不能为空", color="negative")
-                        return
-
-                    # 使用辅助函数或内嵌函数
-                    if HELPERS_ENABLED and helper_parse_float is not None:
-                        parse_float_local = helper_parse_float
-                    else:
-                        def parse_float_local(value: Any) -> Optional[float]:
-                            try:
-                                text = str(value).strip()
-                                return float(text) if text else None
-                            except Exception:
-                                return None
-
-                    floor_area = parse_float_local(floor_area_input.value)
-                    gfa_area = parse_float_local(gfa_area_input.value)
-                    year_built = parse_float_local(year_built_input.value)
-
-                    tags_raw = (tags_input.value or "").strip()
-                    tags_list_local = [t.strip() for t in tags_raw.split(",") if t.strip()]
-
-                    payload: Dict[str, Any] = {
-                        "name": name,
-                        "usage_type": usage_input.value or None,
-                        "floor_area": floor_area,
-                        "gfa_area": gfa_area,
-                        "year_built": year_built,
-                        "tags": tags_list_local or None,
-                    }
-
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.patch(
-                                f"{BACKEND_BASE_URL}/buildings/{building_id}",
-                                json=payload,
-                            )
-                            resp.raise_for_status()
-                    except Exception as exc:  # noqa: BLE001
-                        ui.notify(f"更新楼栋失败: {exc}", color="negative")
-                        return
-
-                    dialog.close()
-                    ui.notify("楼栋已更新", color="positive")
-                    await reload_tree()
-
-                cancel_btn.on_click(dialog.close)
-                confirm_btn.on_click(do_update)
-
-            dialog.open()
+        show_edit_building_dialog(
+            building_id=building_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_tree,
+        )
 
     async def on_delete_node_click() -> None:
         """删除楼栋点击事件（使用新的对话框组件）"""
@@ -1529,41 +950,11 @@ def main_page() -> None:
 
         building_id = current_tree_node_id
 
-        if UI_COMPONENTS_ENABLED:
-            # 使用新的组件
-            show_delete_building_dialog(
-                building_id=building_id,
-                backend_base_url=BACKEND_BASE_URL,
-                on_success=reload_tree,
-            )
-        else:
-            # 保留旧代码作为后备
-            dialog = ui.dialog()
-            with dialog, ui.card():
-                ui.label("删除楼栋").classes("text-subtitle1")
-                ui.label("此操作会删除楼栋及其下属结构，请谨慎操作。")
-
-                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                    cancel_btn = ui.button("取消")
-                    confirm_btn = ui.button("确认删除", color="negative")
-
-                async def do_delete() -> None:
-                    try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            resp = await client.delete(f"{BACKEND_BASE_URL}/buildings/{building_id}")
-                            resp.raise_for_status()
-                    except Exception as exc:  # noqa: BLE001
-                        ui.notify(f"删除楼栋失败: {exc}", color="negative")
-                        return
-
-                    ui.notify("楼栋已删除", color="positive")
-                    dialog.close()
-                    await reload_tree()
-
-                cancel_btn.on_click(dialog.close)
-                confirm_btn.on_click(do_delete)
-
-            dialog.open()
+        show_delete_building_dialog(
+            building_id=building_id,
+            backend_base_url=BACKEND_BASE_URL,
+            on_success=reload_tree,
+        )
 
     project_create_btn.on_click(on_create_project_click)
     project_edit_btn.on_click(on_edit_project_click)
