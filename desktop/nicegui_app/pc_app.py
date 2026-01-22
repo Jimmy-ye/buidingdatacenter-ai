@@ -61,16 +61,24 @@ except ImportError:
 try:
     from desktop.nicegui_app.ui.dialogs import (
         ProjectDialog,
+        EngineeringNodeDialog,
         show_create_project_dialog,
         show_edit_project_dialog,
+        show_create_building_dialog,
+        show_edit_building_dialog,
+        show_delete_building_dialog,
     )
     UI_COMPONENTS_ENABLED = True
 except ImportError:
     # 如果导入失败，禁用 UI 组件
     UI_COMPONENTS_ENABLED = False
     ProjectDialog = None
+    EngineeringNodeDialog = None
     show_create_project_dialog = None
     show_edit_project_dialog = None
+    show_create_building_dialog = None
+    show_edit_building_dialog = None
+    show_delete_building_dialog = None
 # ======================================================================
 
 
@@ -1441,207 +1449,238 @@ def main_page() -> None:
         dialog.open()
 
     async def on_create_building_click() -> None:
+        """创建楼栋点击事件（使用新的对话框组件）"""
         project = get_current_project()
         if not project:
             ui.notify("请先选择项目", color="warning")
             return
 
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            ui.label("新建楼栋").classes("text-subtitle1")
+        project_id = project.get("id")
 
-            name_input = ui.input(label="楼栋名称")
-            usage_input = ui.input(label="用途（可选）")
-            floor_area_input = ui.input(label="建筑面积 m²（可选）")
-            gfa_area_input = ui.input(label="GFA 面积 m²（可选）")
-            year_built_input = ui.input(label="建成年份（可选）")
-            tags_input = ui.input(label="标签（逗号分隔，可选）")
+        if UI_COMPONENTS_ENABLED:
+            # 使用新的组件
+            show_create_building_dialog(
+                project_id=project_id,
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=reload_tree,
+            )
+        else:
+            # 保留旧代码作为后备
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                ui.label("新建楼栋").classes("text-subtitle1")
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("保存", color="primary")
+                name_input = ui.input(label="楼栋名称")
+                usage_input = ui.input(label="用途（可选）")
+                floor_area_input = ui.input(label="建筑面积 m²（可选）")
+                gfa_area_input = ui.input(label="GFA 面积 m²（可选）")
+                year_built_input = ui.input(label="建成年份（可选）")
+                tags_input = ui.input(label="标签（逗号分隔，可选）")
 
-            async def do_create() -> None:
-                name = (name_input.value or "").strip()
-                if not name:
-                    ui.notify("楼栋名称不能为空", color="negative")
-                    return
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("保存", color="primary")
 
-                def parse_float(value: Any) -> Optional[float]:
+                async def do_create() -> None:
+                    name = (name_input.value or "").strip()
+                    if not name:
+                        ui.notify("楼栋名称不能为空", color="negative")
+                        return
+
+                    def parse_float(value: Any) -> Optional[float]:
+                        try:
+                            text = str(value).strip()
+                            return float(text) if text else None
+                        except Exception:
+                            return None
+
+                    floor_area = parse_float(floor_area_input.value)
+                    gfa_area = parse_float(gfa_area_input.value)
+                    year_built = parse_float(year_built_input.value)
+
+                    tags_raw = (tags_input.value or "").strip()
+                    tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                    payload: Dict[str, Any] = {
+                        "name": name,
+                        "usage_type": usage_input.value or None,
+                        "floor_area": floor_area,
+                        "gfa_area": gfa_area,
+                        "year_built": year_built,
+                        "tags": tags_list or None,
+                    }
+
                     try:
-                        text = str(value).strip()
-                        return float(text) if text else None
-                    except Exception:
-                        return None
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.post(
+                                f"{BACKEND_BASE_URL}/projects/{project_id}/buildings",
+                                json=payload,
+                            )
+                            resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"创建楼栋失败: {exc}", color="negative")
+                        return
 
-                floor_area = parse_float(floor_area_input.value)
-                gfa_area = parse_float(gfa_area_input.value)
-                year_built = parse_float(year_built_input.value)
+                    dialog.close()
+                    ui.notify("楼栋创建成功", color="positive")
+                    await reload_tree()
 
-                tags_raw = (tags_input.value or "").strip()
-                tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_create)
 
-                payload: Dict[str, Any] = {
-                    "name": name,
-                    "usage_type": usage_input.value or None,
-                    "floor_area": floor_area,
-                    "gfa_area": gfa_area,
-                    "year_built": year_built,
-                    "tags": tags_list or None,
-                }
-
-                project_id = project.get("id")
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.post(
-                            f"{BACKEND_BASE_URL}/projects/{project_id}/buildings",
-                            json=payload,
-                        )
-                        resp.raise_for_status()
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"创建楼栋失败: {exc}", color="negative")
-                    return
-
-                dialog.close()
-                ui.notify("楼栋创建成功", color="positive")
-                await reload_tree()
-
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_create)
-
-        dialog.open()
+            dialog.open()
 
     async def on_edit_node_click() -> None:
+        """编辑楼栋点击事件（使用新的对话框组件）"""
         if current_tree_node_type != "building" or not current_tree_node_id:
             ui.notify("请先在左侧树中选择一个楼栋节点", color="warning")
             return
 
         building_id = current_tree_node_id
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(f"{BACKEND_BASE_URL}/buildings/{building_id}")
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as exc:  # noqa: BLE001
-            ui.notify(f"加载楼栋信息失败: {exc}", color="negative")
-            return
-
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            ui.label("编辑楼栋").classes("text-subtitle1")
-
-            name_input = ui.input(label="楼栋名称", value=data.get("name") or "")
-            usage_input = ui.input(label="用途（可选）", value=data.get("usage_type") or "")
-
-            def fmt_float(v: Any) -> str:
-                return "" if v is None else str(v)
-
-            floor_area_input = ui.input(
-                label="建筑面积 m²（可选）",
-                value=fmt_float(data.get("floor_area")),
+        if UI_COMPONENTS_ENABLED:
+            # 使用新的组件
+            show_edit_building_dialog(
+                building_id=building_id,
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=reload_tree,
             )
-            gfa_area_input = ui.input(
-                label="GFA 面积 m²（可选）",
-                value=fmt_float(data.get("gfa_area")),
-            )
-            year_built_input = ui.input(
-                label="建成年份（可选）",
-                value=fmt_float(data.get("year_built")),
-            )
+        else:
+            # 保留旧代码作为后备
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(f"{BACKEND_BASE_URL}/buildings/{building_id}")
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                ui.notify(f"加载楼栋信息失败: {exc}", color="negative")
+                return
 
-            tags_value = ""
-            tags_list = data.get("tags") or []
-            if isinstance(tags_list, list):
-                tags_value = ",".join(str(t) for t in tags_list)
-            tags_input = ui.input(label="标签（逗号分隔，可选）", value=tags_value)
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                ui.label("编辑楼栋").classes("text-subtitle1")
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("保存", color="primary")
+                name_input = ui.input(label="楼栋名称", value=data.get("name") or "")
+                usage_input = ui.input(label="用途（可选）", value=data.get("usage_type") or "")
 
-            async def do_update() -> None:
-                name = (name_input.value or "").strip()
-                if not name:
-                    ui.notify("楼栋名称不能为空", color="negative")
-                    return
+                def fmt_float(v: Any) -> str:
+                    return "" if v is None else str(v)
 
-                def parse_float(value: Any) -> Optional[float]:
+                floor_area_input = ui.input(
+                    label="建筑面积 m²（可选）",
+                    value=fmt_float(data.get("floor_area")),
+                )
+                gfa_area_input = ui.input(
+                    label="GFA 面积 m²（可选）",
+                    value=fmt_float(data.get("gfa_area")),
+                )
+                year_built_input = ui.input(
+                    label="建成年份（可选）",
+                    value=fmt_float(data.get("year_built")),
+                )
+
+                tags_value = ""
+                tags_list = data.get("tags") or []
+                if isinstance(tags_list, list):
+                    tags_value = ",".join(str(t) for t in tags_list)
+                tags_input = ui.input(label="标签（逗号分隔，可选）", value=tags_value)
+
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("保存", color="primary")
+
+                async def do_update() -> None:
+                    name = (name_input.value or "").strip()
+                    if not name:
+                        ui.notify("楼栋名称不能为空", color="negative")
+                        return
+
+                    def parse_float(value: Any) -> Optional[float]:
+                        try:
+                            text = str(value).strip()
+                            return float(text) if text else None
+                        except Exception:
+                            return None
+
+                    floor_area = parse_float(floor_area_input.value)
+                    gfa_area = parse_float(gfa_area_input.value)
+                    year_built = parse_float(year_built_input.value)
+
+                    tags_raw = (tags_input.value or "").strip()
+                    tags_list_local = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                    payload: Dict[str, Any] = {
+                        "name": name,
+                        "usage_type": usage_input.value or None,
+                        "floor_area": floor_area,
+                        "gfa_area": gfa_area,
+                        "year_built": year_built,
+                        "tags": tags_list_local or None,
+                    }
+
                     try:
-                        text = str(value).strip()
-                        return float(text) if text else None
-                    except Exception:
-                        return None
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.patch(
+                                f"{BACKEND_BASE_URL}/buildings/{building_id}",
+                                json=payload,
+                            )
+                            resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"更新楼栋失败: {exc}", color="negative")
+                        return
 
-                floor_area = parse_float(floor_area_input.value)
-                gfa_area = parse_float(gfa_area_input.value)
-                year_built = parse_float(year_built_input.value)
+                    dialog.close()
+                    ui.notify("楼栋已更新", color="positive")
+                    await reload_tree()
 
-                tags_raw = (tags_input.value or "").strip()
-                tags_list_local = [t.strip() for t in tags_raw.split(",") if t.strip()]
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_update)
 
-                payload: Dict[str, Any] = {
-                    "name": name,
-                    "usage_type": usage_input.value or None,
-                    "floor_area": floor_area,
-                    "gfa_area": gfa_area,
-                    "year_built": year_built,
-                    "tags": tags_list_local or None,
-                }
-
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.patch(
-                            f"{BACKEND_BASE_URL}/buildings/{building_id}",
-                            json=payload,
-                        )
-                        resp.raise_for_status()
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"更新楼栋失败: {exc}", color="negative")
-                    return
-
-                dialog.close()
-                ui.notify("楼栋已更新", color="positive")
-                await reload_tree()
-
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_update)
-
-        dialog.open()
+            dialog.open()
 
     async def on_delete_node_click() -> None:
+        """删除楼栋点击事件（使用新的对话框组件）"""
         if current_tree_node_type != "building" or not current_tree_node_id:
             ui.notify("请先在左侧树中选择一个楼栋节点", color="warning")
             return
 
         building_id = current_tree_node_id
 
-        dialog = ui.dialog()
-        with dialog, ui.card():
-            ui.label("删除楼栋").classes("text-subtitle1")
-            ui.label("此操作会删除楼栋及其下属结构，请谨慎操作。")
+        if UI_COMPONENTS_ENABLED:
+            # 使用新的组件
+            show_delete_building_dialog(
+                building_id=building_id,
+                backend_base_url=BACKEND_BASE_URL,
+                on_success=reload_tree,
+            )
+        else:
+            # 保留旧代码作为后备
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                ui.label("删除楼栋").classes("text-subtitle1")
+                ui.label("此操作会删除楼栋及其下属结构，请谨慎操作。")
 
-            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
-                cancel_btn = ui.button("取消")
-                confirm_btn = ui.button("确认删除", color="negative")
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("确认删除", color="negative")
 
-            async def do_delete() -> None:
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        resp = await client.delete(f"{BACKEND_BASE_URL}/buildings/{building_id}")
-                        resp.raise_for_status()
-                except Exception as exc:  # noqa: BLE001
-                    ui.notify(f"删除楼栋失败: {exc}", color="negative")
-                    return
+                async def do_delete() -> None:
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.delete(f"{BACKEND_BASE_URL}/buildings/{building_id}")
+                            resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"删除楼栋失败: {exc}", color="negative")
+                        return
 
-                ui.notify("楼栋已删除", color="positive")
-                dialog.close()
-                await reload_tree()
+                    ui.notify("楼栋已删除", color="positive")
+                    dialog.close()
+                    await reload_tree()
 
-            cancel_btn.on_click(dialog.close)
-            confirm_btn.on_click(do_delete)
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_delete)
 
-        dialog.open()
+            dialog.open()
 
     project_create_btn.on_click(on_create_project_click)
     project_edit_btn.on_click(on_edit_project_click)

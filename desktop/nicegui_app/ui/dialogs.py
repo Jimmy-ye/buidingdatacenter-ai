@@ -243,3 +243,341 @@ def show_edit_project_dialog(
     )
     dialog.show_edit(project)
     return dialog
+
+
+# ==================== 工程结构节点对话框组件 ====================
+
+class EngineeringNodeDialog:
+    """
+    工程结构节点对话框组件
+
+    封装创建、编辑、删除楼栋等节点的对话框逻辑
+    """
+
+    def __init__(
+        self,
+        backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+        on_success: Optional[Callable] = None,
+    ):
+        """
+        初始化工程节点对话框
+
+        Args:
+            backend_base_url: 后端 API 基础 URL
+            on_success: 成功回调
+        """
+        self.backend_base_url = backend_base_url
+        self.on_success = on_success
+
+    @staticmethod
+    def _parse_float(value: Any) -> Optional[float]:
+        """解析浮点数"""
+        try:
+            text = str(value).strip()
+            return float(text) if text else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _format_float(v: Any) -> str:
+        """格式化浮点数为字符串"""
+        return "" if v is None else str(v)
+
+    def show_create_building(
+        self,
+        project_id: str,
+        project_name: Optional[str] = None,
+    ) -> None:
+        """
+        显示创建楼栋对话框
+
+        Args:
+            project_id: 项目 ID
+            project_name: 项目名称（可选，用于显示）
+        """
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("新建楼栋").classes("text-subtitle1")
+
+            name_input = ui.input(label="楼栋名称")
+            usage_input = ui.input(label="用途（可选）")
+            floor_area_input = ui.input(label="建筑面积 m²（可选）")
+            gfa_area_input = ui.input(label="GFA 面积 m²（可选）")
+            year_built_input = ui.input(label="建成年份（可选）")
+            tags_input = ui.input(label="标签（逗号分隔，可选）")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("保存", color="primary")
+
+            async def do_create() -> None:
+                """执行创建楼栋"""
+                name = (name_input.value or "").strip()
+                if not name:
+                    ui.notify("楼栋名称不能为空", color="negative")
+                    return
+
+                floor_area = self._parse_float(floor_area_input.value)
+                gfa_area = self._parse_float(gfa_area_input.value)
+                year_built = self._parse_float(year_built_input.value)
+
+                tags_raw = (tags_input.value or "").strip()
+                tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                payload: Dict[str, Any] = {
+                    "name": name,
+                    "usage_type": usage_input.value or None,
+                    "floor_area": floor_area,
+                    "gfa_area": gfa_area,
+                    "year_built": year_built,
+                    "tags": tags_list or None,
+                }
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.post(
+                            f"{self.backend_base_url}/projects/{project_id}/buildings",
+                            json=payload,
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"创建楼栋失败: {exc}", color="negative")
+                    return
+
+                dialog.close()
+                ui.notify("楼栋创建成功", color="positive")
+
+                if self.on_success:
+                    await self.on_success()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_create)
+
+        dialog.open()
+
+    def show_edit_building(
+        self,
+        building_id: str,
+    ) -> None:
+        """
+        显示编辑楼栋对话框
+
+        Args:
+            building_id: 楼栋 ID
+        """
+        # 先加载楼栋信息
+        import asyncio
+
+        async def load_and_show():
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(
+                        f"{self.backend_base_url}/buildings/{building_id}"
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as exc:  # noqa: BLE001
+                ui.notify(f"加载楼栋信息失败: {exc}", color="negative")
+                return
+
+            dialog = ui.dialog()
+            with dialog, ui.card():
+                ui.label("编辑楼栋").classes("text-subtitle1")
+
+                name_input = ui.input(
+                    label="楼栋名称",
+                    value=data.get("name") or ""
+                )
+                usage_input = ui.input(
+                    label="用途（可选）",
+                    value=data.get("usage_type") or ""
+                )
+                floor_area_input = ui.input(
+                    label="建筑面积 m²（可选）",
+                    value=self._format_float(data.get("floor_area")),
+                )
+                gfa_area_input = ui.input(
+                    label="GFA 面积 m²（可选）",
+                    value=self._format_float(data.get("gfa_area")),
+                )
+                year_built_input = ui.input(
+                    label="建成年份（可选）",
+                    value=self._format_float(data.get("year_built")),
+                )
+
+                tags_value = ""
+                tags_list = data.get("tags") or []
+                if isinstance(tags_list, list):
+                    tags_value = ",".join(str(t) for t in tags_list)
+                tags_input = ui.input(
+                    label="标签（逗号分隔，可选）",
+                    value=tags_value
+                )
+
+                with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                    cancel_btn = ui.button("取消")
+                    confirm_btn = ui.button("保存", color="primary")
+
+                async def do_update() -> None:
+                    """执行更新楼栋"""
+                    name = (name_input.value or "").strip()
+                    if not name:
+                        ui.notify("楼栋名称不能为空", color="negative")
+                        return
+
+                    floor_area = self._parse_float(floor_area_input.value)
+                    gfa_area = self._parse_float(gfa_area_input.value)
+                    year_built = self._parse_float(year_built_input.value)
+
+                    tags_raw = (tags_input.value or "").strip()
+                    tags_list_local = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+                    payload: Dict[str, Any] = {
+                        "name": name,
+                        "usage_type": usage_input.value or None,
+                        "floor_area": floor_area,
+                        "gfa_area": gfa_area,
+                        "year_built": year_built,
+                        "tags": tags_list_local or None,
+                    }
+
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            resp = await client.patch(
+                                f"{self.backend_base_url}/buildings/{building_id}",
+                                json=payload,
+                            )
+                            resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"更新楼栋失败: {exc}", color="negative")
+                        return
+
+                    dialog.close()
+                    ui.notify("楼栋已更新", color="positive")
+
+                    if self.on_success:
+                        await self.on_success()
+
+                cancel_btn.on_click(dialog.close)
+                confirm_btn.on_click(do_update)
+
+            dialog.open()
+
+        # 在 NiceGUI 上下文中运行异步函数
+        asyncio.create_task(load_and_show())
+
+    def show_delete_building(
+        self,
+        building_id: str,
+    ) -> None:
+        """
+        显示删除楼栋确认对话框
+
+        Args:
+            building_id: 楼栋 ID
+        """
+        dialog = ui.dialog()
+        with dialog, ui.card():
+            ui.label("删除楼栋").classes("text-subtitle1")
+            ui.label("此操作会删除楼栋及其下属结构，请谨慎操作。")
+
+            with ui.row().classes("q-mt-md q-gutter-sm justify-end"):
+                cancel_btn = ui.button("取消")
+                confirm_btn = ui.button("确认删除", color="negative")
+
+            async def do_delete() -> None:
+                """执行删除楼栋"""
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        resp = await client.delete(
+                            f"{self.backend_base_url}/buildings/{building_id}"
+                        )
+                        resp.raise_for_status()
+                except Exception as exc:  # noqa: BLE001
+                    ui.notify(f"删除楼栋失败: {exc}", color="negative")
+                    return
+
+                ui.notify("楼栋已删除", color="positive")
+                dialog.close()
+
+                if self.on_success:
+                    await self.on_success()
+
+            cancel_btn.on_click(dialog.close)
+            confirm_btn.on_click(do_delete)
+
+        dialog.open()
+
+
+# ==================== 便捷函数 ====================
+
+def show_create_building_dialog(
+    project_id: str,
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable] = None,
+) -> EngineeringNodeDialog:
+    """
+    显示创建楼栋对话框（便捷函数）
+
+    Args:
+        project_id: 项目 ID
+        backend_base_url: 后端 API 基础 URL
+        on_success: 成功回调
+
+    Returns:
+        EngineeringNodeDialog 实例
+    """
+    dialog = EngineeringNodeDialog(
+        backend_base_url=backend_base_url,
+        on_success=on_success,
+    )
+    dialog.show_create_building(project_id)
+    return dialog
+
+
+def show_edit_building_dialog(
+    building_id: str,
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable] = None,
+) -> EngineeringNodeDialog:
+    """
+    显示编辑楼栋对话框（便捷函数）
+
+    Args:
+        building_id: 楼栋 ID
+        backend_base_url: 后端 API 基础 URL
+        on_success: 成功回调
+
+    Returns:
+        EngineeringNodeDialog 实例
+    """
+    dialog = EngineeringNodeDialog(
+        backend_base_url=backend_base_url,
+        on_success=on_success,
+    )
+    dialog.show_edit_building(building_id)
+    return dialog
+
+
+def show_delete_building_dialog(
+    building_id: str,
+    backend_base_url: str = "http://127.0.0.1:8000/api/v1",
+    on_success: Optional[Callable] = None,
+) -> EngineeringNodeDialog:
+    """
+    显示删除楼栋确认对话框（便捷函数）
+
+    Args:
+        building_id: 楼栋 ID
+        backend_base_url: 后端 API 基础 URL
+        on_success: 成功回调
+
+    Returns:
+        EngineeringNodeDialog 实例
+    """
+    dialog = EngineeringNodeDialog(
+        backend_base_url=backend_base_url,
+        on_success=on_success,
+    )
+    dialog.show_delete_building(building_id)
+    return dialog
