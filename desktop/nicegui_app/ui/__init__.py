@@ -20,6 +20,11 @@ from desktop.nicegui_app.ui.dialogs import (
     show_delete_asset_dialog,
 )
 
+from desktop.nicegui_app.ui.panels import (
+    AssetDetailHelper,
+    update_asset_detail_panel,
+)
+
 __all__ = [
     "ProjectDialog",
     "EngineeringNodeDialog",
@@ -31,4 +36,6 @@ __all__ = [
     "show_delete_building_dialog",
     "show_upload_asset_dialog",
     "show_delete_asset_dialog",
+    "AssetDetailHelper",
+    "update_asset_detail_panel",
 ]
