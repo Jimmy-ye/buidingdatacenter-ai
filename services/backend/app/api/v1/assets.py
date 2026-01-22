@@ -191,14 +191,19 @@ async def list_assets(
     zone_id: Optional[uuid.UUID] = Query(default=None, description="Filter by zone ID"),
     system_id: Optional[uuid.UUID] = Query(default=None, description="Filter by system ID"),
     device_id: Optional[uuid.UUID] = Query(default=None, description="Filter by device ID"),
+    updated_after: Optional[datetime] = Query(
+        default=None,
+        description="Return only assets with capture_time later than this UTC timestamp (incremental sync)",
+    ),
     db: Session = Depends(get_db),
 ) -> List[AssetRead]:
-    """List assets with optional multi-dimensional filters.
+    """List assets with optional multi-dimensional and incremental-sync filters.
 
     Supports filtering by:
     - project
     - modality / content_role
     - building / zone / system / device
+    - updated_after (for incremental sync based on capture_time)
     """
 
     query = db.query(Asset)
@@ -216,6 +221,8 @@ async def list_assets(
         query = query.filter(Asset.system_id == system_id)
     if device_id is not None:
         query = query.filter(Asset.device_id == device_id)
+    if updated_after is not None:
+        query = query.filter(Asset.capture_time > updated_after)
 
     assets = query.order_by(Asset.capture_time.desc().nullslast()).all()
     return assets
@@ -264,12 +271,15 @@ async def create_scene_issue_report(
     if asset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
-    # Enforce that this endpoint is only used for scene_issue images
+    # Enforce that this endpoint is only used for image assets with supported roles
     role = (asset.content_role or "").lower()
-    if asset.modality != "image" or role != "scene_issue":
+    if asset.modality != "image" or role not in {"scene_issue", "meter"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="scene_issue_report is only valid for image assets with content_role='scene_issue'",
+            detail=(
+                "scene_issue_report is only valid for image assets with "
+                "content_role in {'scene_issue', 'meter'}"
+            ),
         )
 
     existing_count = (
@@ -419,11 +429,20 @@ async def upload_image_with_note(
 
     # Optional automatic routing based on content_role
     if auto_route and asset.id:
+        print(
+            f"[DEBUG] upload_image_with_note auto_route={auto_route} "
+            f"asset_id={asset.id} content_role={asset.content_role!r}"
+        )
         try:
             routed = route_image_asset(db, asset)
+            print(
+                f"[DEBUG] route_image_asset returned asset_id={routed.id} "
+                f"status={routed.status}"
+            )
             return routed
-        except ValueError:
+        except ValueError as exc:
             # Fall back to plain asset if routing fails (e.g. non-image modality)
+            print(f"[WARN] route_image_asset failed for asset {asset.id}: {exc}")
             pass
 
     return asset
@@ -509,6 +528,46 @@ async def upload_table_asset(
     if hierarchy["path"] is not None:
         setattr(asset, "engineer_path", hierarchy["path"])
     return asset
+
+
+@router.delete(
+    "/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete asset and associated payloads/features and file blob",
+)
+async def delete_asset(
+    asset_id: uuid.UUID = Path(..., description="Asset ID"),
+    delete_file: bool = Query(
+        True,
+        description="If true, also delete underlying file on disk and related FileBlob record",
+    ),
+    db: Session = Depends(get_db),
+) -> None:
+    asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    file_blob = None
+    file_path: Optional[str] = None
+    if asset.file_id is not None:
+        file_blob = db.query(FileBlob).filter(FileBlob.id == asset.file_id).one_or_none()
+        if file_blob is not None:
+            file_path = file_blob.path
+
+    db.delete(asset)
+    if file_blob is not None:
+        db.delete(file_blob)
+    db.commit()
+
+    if delete_file and file_path:
+        base_dir = settings.local_storage_dir
+        abs_path = os.path.join(base_dir, file_path)
+        try:
+            if os.path.exists(abs_path):
+                os.remove(abs_path)
+        except OSError:
+            # 文件删除失败不影响接口结果
+            pass
 
 
 @router.post(

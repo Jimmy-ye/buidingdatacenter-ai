@@ -1,0 +1,11 @@
+# BDC-AI PC 端应用依赖
+# Python 3.11+
+
+# NiceGUI 核心框架
+nicegui==2.7.0
+
+# HTTP 客户端
+httpx==0.27.0
+
+# 可选：数据可视化
+# plotly==5.22.0

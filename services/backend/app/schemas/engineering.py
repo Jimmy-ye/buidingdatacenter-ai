@@ -8,8 +8,8 @@ class BuildingBase(BaseModel):
     name: str
     usage_type: Optional[str] = None
     floor_area: Optional[float] = None
+    gfa_area: Optional[float] = None
     year_built: Optional[float] = None
-    energy_grade: Optional[str] = None
     tags: Optional[List[str]] = None
 
 

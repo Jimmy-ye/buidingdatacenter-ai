@@ -6,14 +6,14 @@ BDC-AI (Building Data Center AI) 是一个面向建筑节能诊断与能源管�
 
 ### 核心能力
 
-- **🏗️ 工程结构管理**: 完整的 Building/Zone/System/Device 层级管理，支持树形结构视图和多维度查询
-- **🔗 多模态关联**: Asset 资产与工程结构双向关联，支持从任意工程节点查询相关资料
-- **📊 多模态数据管理**: 统一管理项目相关的图片、表格、文本、音频、时序能耗数据
+- **🏗️ 工程结构管理**: 完整的 Project/Building/Zone/System/Device 层级管理，支持树形结构视图和多维度查询
+- **🖥️ PC 端可视化界面**: 基于 NiceGUI 3.5.0 的桌面应用，支持工程结构树浏览、资产列表、图片预览和 OCR/LLM 结果查看 ✨
+- **📱 多模态数据管理**: 统一管理项目相关的图片、表格、文本、音频、时序能耗数据
+- **🔗 智能关联**: Asset 资产与工程结构自动双向关联，支持从任意工程节点查询相关资料
 - **🤖 AI 智能分析**: 集成 PaddleOCR 和 GLM-4V 实现图片文本提取和场景问题智能诊断
 - **⚙️ 自动化工作流**: Worker 后台自动处理待分析图片，生成结构化诊断报告
-- **📝 版本化管理**: 所有分析结果版本化存储，支持追溯和对比
 - **🏷️ 灵活标签系统**: JSONB 标签支持，方便业务分类和检索
-- **📱 多端接入**: 支持 PC 端分析决策、手机端现场采集、服务器统一调度
+- **📝 版本化管理**: 所有分析结果版本化存储，支持追溯和对比
 
 ---
 
@@ -24,6 +24,7 @@ BDC-AI (Building Data Center AI) 是一个面向建筑节能诊断与能源管�
 | 组件 | 技术选型 | 版本 | 说明 |
 |------|----------|------|------|
 | 后端框架 | FastAPI | 0.104.1 | 高性能异步 Web 框架 |
+| PC UI | NiceGUI | 3.5.0 | Python 原生 UI 框架 ✨ |
 | 数据库 ORM | SQLAlchemy | 2.0.23 | Python SQL 工具包和 ORM |
 | 数据库 | PostgreSQL | 18.1 | 关系型数据库，支持 UUID、JSON |
 | 数据库扩展 | pgvector | - | PostgreSQL 向量扩展（预留） |
@@ -33,7 +34,7 @@ BDC-AI (Building Data Center AI) 是一个面向建筑节能诊断与能源管�
 | OCR 引擎 | PaddleOCR | 2.7.0.3 | 百度开源 OCR 工具包 |
 | 深度学习框架 | PaddlePaddle | 2.6.2 | PaddleOCR 后端 |
 | 视觉大模型 | GLM-4V | - | 智谱 AI 多模态大模型 |
-| PDF 处理 | PyMuPDF | 1.26.7 | PDF 文档解析 |
+| PDF 处理 | PyMuPDF | 1.23.26 | PDF 文档解析 |
 | 测试框架 | Pytest | - | Python 测试框架 |
 | 树形结构 | bigtree | 0.16.4 | Python 树形结构处理库 |
 
@@ -44,7 +45,8 @@ BDC-AI (Building Data Center AI) 是一个面向建筑节能诊断与能源管�
 │                         客户端层                             │
 ├──────────────────────┬──────────────────────────────────────┤
 │   PC Web UI          │    移动端 App / 小程序               │
-│   (Swagger/Streamlit)│    (现场采集 + 上传)                 │
+│   (NiceGUI 3.5.0)   │    (现场采集 + 上传)                 │
+│   桌面分析决策界面   │                                      │
 └──────────────────────┴──────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -74,60 +76,63 @@ BDC-AI (Building Data Center AI) 是一个面向建筑节能诊断与能源管�
 
 ```
 program-bdc-ai/
-├── services/                      # 后端服务
-│   ├── backend/                   # FastAPI 后端服务
+├── desktop/                       # PC 桌面应用 ✨
+│   └── nicegui_app/
+│       └── pc_app.py            # NiceGUI PC 端主程序
+├── services/                     # 后端服务
+│   ├── backend/                 # FastAPI 后端服务
 │   │   ├── app/
-│   │   │   ├── api/               # API 路由
+│   │   │   ├── api/             # API 路由
 │   │   │   │   └── v1/
-│   │   │   │       ├── health.py      # 健康检查
+│   │   │   │       ├── health.py       # 健康检查
 │   │   │   │       ├── projects.py    # 项目管理
 │   │   │   │       ├── engineering.py # 工程结构管理 ✨
 │   │   │   │       └── assets.py      # 资产管理（上传/OCR/GLM）
-│   │   │   ├── schemas/           # Pydantic 模型
+│   │   │   ├── schemas/         # Pydantic 模型
 │   │   │   │   ├── asset.py
 │   │   │   │   └── engineering.py  # 工程结构模型 ✨
-│   │   │   ├── services/          # 业务逻辑
+│   │   │   ├── services/        # 业务逻辑
 │   │   │   │   ├── image_pipeline.py  # 图片处理流水线
 │   │   │   │   └── tree_service.py    # 树形结构服务 ✨
-│   │   │   └── main.py            # FastAPI 应用入口
-│   │   └── requirements.txt       # Python 依赖
-│   └── worker/                    # GLM Worker 后台服务
+│   │   │   └── main.py          # FastAPI 应用入口
+│   │   └── requirements.txt     # Python 依赖
+│   └── worker/                  # GLM Worker 后台服务
 │       ├── scene_issue_glm_worker.py  # GLM-4V 场景问题分析
 │       └── test_scene_issue_pipeline.py  # 完整流程测试
-├── shared/                        # 共享代码
+├── shared/                       # 共享代码
 │   ├── config/
-│   │   └── settings.py            # Settings 配置类
-│   └── db/                        # 数据库
-│       ├── base.py                # SQLAlchemy 声明式基类
-│       ├── session.py             # 数据库会话管理
-│       ├── models_project.py      # 项目相关模型（含工程结构）
-│       └── models_asset.py        # 资产相关模型
-├── tests/                         # 测试目录
-│   ├── integration/               # 集成测试
-│   │   ├── test_asset_engineering_link.py  # Asset-工程结构集成测试 ✨
-│   │   ├── test_engineering_structure.py   # 工程结构测试 ✨
-│   │   └── test_engineering_simple.py      # 工程结构简单测试 ✨
-│   ├── ENGINEERING_STRUCTURE_TEST_GUIDE.md # 工程结构测试指南 ✨
-│   └── ASSET_ENGINEERING_TEST_GUIDE.md     # Asset-工程结构测试指南 ✨
-├── data/                          # 本地数据目录
-│   └── assets/                    # 上传的文件存储
-├── docs/                          # 文档目录（已中文化）
-│   ├── README.md                  # 文档导航索引 ✨
-│   ├── API使用示例.md              # API 使用示例
-│   ├── 项目总结.md                # 项目进度总结 ✨
-│   ├── PostgreSQL迁移总结.md      # PostgreSQL 迁移总结 ✨
-│   ├── GLM_Worker测试报告.md       # GLM Worker 测试报告
-│   └── 项目清理与安全加固总结.md   # 安全总结
-├── GUIDEBOOK/                     # 指南文档（已中文化）
-│   ├── README.md                  # 指南导航索引 ✨
-│   ├── 项目规划.md                # 项目详细规划
-│   ├── 技术指南.md                # 技术解析（含 bigtree）
-│   ├── 工程结构API设计.md          # 工程结构 API 设计 ✨
-│   └── 技术栈选型.md              # 技术栈选型指南 ✨
-├── .env                           # 环境变量配置
-├── .env.example                   # 环境变量示例
-├── README.md                      # 本文件
-└── add_tags_columns.sql           # tags 列 SQL 脚本 ✨
+│   │   └── settings.py         # Settings 配置类
+│   └── db/                     # 数据库
+│       ├── base.py             # SQLAlchemy 声明式基类
+│       ├── session.py          # 数据库会话管理
+│       ├── models_project.py   # 项目相关模型（含工程结构）
+│       └── models_asset.py    # 资产相关模型
+├── data/                        # 本地数据目录
+│   └── assets/                # 上传的文件存储
+├── docs/                       # 文档目录
+│   ├── 00-项目总览/
+│   │   ├── README.md           # 项目总览
+│   │   ├── 项目总结.md         # 项目进度总结 ✨
+│   │   └── 项目规划.md         # 项目规划文档
+│   ├── 01-开发指南/
+│   │   ├── 工程结构测试指南.md # 测试指南 ✨
+│   │   ├── Asset与工程结构测试指南.md # 集成测试指南 ✨
+│   │   └── API使用示例.md      # API 使用示例
+│   ├── 02-技术文档/
+│   │   ├── 工程结构API设计.md  # API 设计文档 ✨
+│   │   ├── 技术指南.md         # 技术深度解析
+│   │   ├── 技术栈选型.md       # 技术栈选型
+│   │   └── 表格处理管道设计.md  # 表格处理设计
+│   ├── 03-优化记录/
+│   │   ├── pc-ui-enhancement-plan.md # PC UI 优化方案 ✨
+│   │   └── pc-ui-layout-optimization.md # PC UI 布局优化 ✨
+│   └── 04-迁移记录/
+│       ├── PostgreSQL迁移总结.md # 迁移记录 ✨
+│       └── 项目清理与安全加固总结.md # 安全总结 ✨
+├── .env                        # 环境变量配置
+├── .env.example               # 环境变量示例
+├── README.md                  # 本文件
+└── CLAUDE.md                  # Claude AI 开发指南 ✨
 ```
 
 ---
@@ -148,7 +153,7 @@ cd services/backend
 pip install -r requirements.txt
 
 # 或安装核心依赖
-pip install fastapi uvicorn sqlalchemy psycopg2-binary paddleocr python-dotenv openai
+pip install fastapi uvicorn sqlalchemy psycopg2-binary paddleocr python-dotenv openai nicegui
 ```
 
 ### 配置环境变量
@@ -189,12 +194,14 @@ GRANT ALL PRIVILEGES ON DATABASE bdc_ai TO admin;
 
 **启动后端服务**：
 ```bash
-# 方式 1：从项目根目录启动
+# 从项目根目录启动
 python -m uvicorn services.backend.app.main:app --host localhost --port 8000 --reload
+```
 
-# 方式 2：从 backend 目录启动
-cd services/backend
-python -m uvicorn app.main:app --host localhost --port 8000 --reload
+**启动 PC UI**：
+```bash
+# 启动桌面应用
+python desktop/nicegui_app/pc_app.py
 ```
 
 **启动 GLM Worker**（可选，用于自动场景问题分析）：
@@ -203,28 +210,52 @@ cd services/worker
 python scene_issue_glm_worker.py
 ```
 
-服务将在 `http://localhost:8000` 启动。
+### 访问界面
 
-### 验证服务
+- **后端 API**: http://localhost:8000
+- **PC UI**: http://localhost:8080
+- **Swagger 文档**: http://localhost:8000/docs
+- **ReDoc 文档**: http://localhost:8000/redoc
 
-```bash
-# 测试根路径
-curl http://localhost:8000/
+---
 
-# 测试健康检查
-curl http://localhost:8000/api/v1/health/
+## 🖥️ PC UI 功能特性
 
-# 预期响应
-# {"status":"ok"}
-```
+### 核心功能
 
-### 访问 API 文档
+1. **项目管理条** ✨
+   - 顶部项目选择器，快速切换不同项目
+   - 实时加载项目列表
+   - 自动加载选中项目的工程结构树
 
-启动服务后，在浏览器中访问：
+2. **工程结构树**
+   - 左侧树形结构展示 Building → System → Device 层级
+   - 点击节点加载对应资产列表
+   - Zone 作为独立节点显示
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-- **OpenAPI Schema**: http://localhost:8000/openapi.json
+3. **资产管理**
+   - 表格视图展示资产列表
+   - 支持按 device_id 过滤
+   - 点击行显示资产详情
+
+4. **资产详情面板**
+   - 基础信息：标题、类型、采集时间、描述
+   - 图片预览：支持大图预览对话框
+   - OCR/LLM 识别结果：
+     - 表具类型：只显示 LLM 分析结果
+     - 其他类型：显示 OCR 详细信息 + LLM 分析
+
+5. **智能提示**
+   - 操作反馈通知（成功/失败/警告）
+   - 加载状态提示
+   - 错误处理提示
+
+### 技术亮点
+
+- **懒加载优化**: 图片组件设置 `loading=eager` 避免浏览器懒加载问题
+- **按需加载**: 点击资产时调用详情 API 获取完整数据
+- **双表模式**: List API + Detail API 分离，提升性能
+- **响应式布局**: 自适应窗口大小
 
 ---
 
@@ -243,8 +274,8 @@ Content-Type: application/json
   "name": "A座办公楼",
   "usage_type": "office",
   "floor_area": 8000.0,
-  "year_built": 2018,
-  "energy_grade": "A"
+  "gfa_area": 8000.0,
+  "year_built": 2018
 }
 ```
 
@@ -255,8 +286,7 @@ Content-Type: application/json
 
 {
   "name": "5F办公区",
-  "type": "office",
-  "geometry_ref": "L5-Office"
+  "type": "office"
 }
 ```
 
@@ -282,8 +312,7 @@ Content-Type: application/json
   "device_type": "fcu",
   "model": "风机盘管FCU-03",
   "rated_power": 1.5,
-  "serial_no": "FCU-03",
-  "tags": ["高能耗", "需维护"]
+  "serial_no": "FCU-03"
 }
 ```
 
@@ -295,26 +324,6 @@ GET /api/v1/projects/{project_id}/structure_tree
 **扁平化设备查询**
 ```http
 GET /api/v1/projects/{project_id}/devices/flat?device_type=fcu&min_rated_power=1.0&tags=高能耗
-```
-
-**反向查询：Device → Assets**
-```http
-GET /api/v1/devices/{device_id}/assets
-```
-
-**反向查询：System → Assets**
-```http
-GET /api/v1/systems/{system_id}/assets
-```
-
-**反向查询：Zone → Assets**
-```http
-GET /api/v1/zones/{zone_id}/assets
-```
-
-**反向查询：Building → Assets**
-```http
-GET /api/v1/buildings/{building_id}/assets
 ```
 
 #### 1. 项目管理
@@ -338,16 +347,11 @@ Content-Type: application/json
 GET /api/v1/projects/
 ```
 
-**查询单个项目**
-```http
-GET /api/v1/projects/{project_id}
-```
-
 #### 2. 资产管理
 
-**上传图片并触发 OCR（支持工程结构绑定）✨**
+**上传图片并触发 OCR**
 ```http
-POST /api/v1/assets/upload_image_with_note?project_id={uuid}&modality=image&source=mobile&content_role=meter&auto_route=true&building_id={uuid}&zone_id={uuid}&system_id={uuid}&device_id={uuid}
+POST /api/v1/assets/upload_image_with_note?project_id={uuid}&modality=image&content_role=meter
 Content-Type: multipart/form-data
 
 file: <图片文件>
@@ -355,40 +359,14 @@ note: "备注信息"
 title: "图片标题"
 ```
 
-**说明**：支持同时绑定 building_id/zone_id/system_id/device_id，实现 Asset 与工程结构的关联。
-
-**查询资产列表（支持工程结构过滤）✨**
+**查询资产列表**
 ```http
-GET /api/v1/assets/?project_id={uuid}&building_id={uuid}&zone_id={uuid}&system_id={uuid}&device_id={uuid}&modality=image&content_role=scene_issue
+GET /api/v1/assets/?device_id={uuid}
 ```
-
-**说明**：支持 project_id/building_id/zone_id/system_id/device_id 五个维度的任意组合过滤。
 
 **查询资产详情**
 ```http
 GET /api/v1/assets/{asset_id}
-```
-
-**触发图片智能路由**
-```http
-POST /api/v1/assets/{asset_id}/route_image
-```
-
-**提交场景问题报告（GLM 分析结果）**
-```http
-POST /api/v1/assets/{asset_id}/scene_issue_report
-Content-Type: application/json
-
-{
-  "title": "制冷系统效率低下",
-  "issue_category": "冷源效率",
-  "severity": "high",
-  "summary": "冷却塔水位过高，导致换热效率下降",
-  "suspected_causes": ["水位控制器故障", "水位传感器失灵"],
-  "recommended_actions": ["更换水位控制器", "校准水位传感器"],
-  "confidence": 0.8,
-  "tags": ["冷却塔", "水位", "效率低下"]
-}
 ```
 
 #### 3. 健康检查
@@ -397,166 +375,9 @@ Content-Type: application/json
 GET /api/v1/health/
 ```
 
-**响应示例**:
-```json
-{
-  "status": "ok"
-}
-```
-
 ### 完整 API 列表
 
 详见 Swagger 文档: http://localhost:8000/docs
-
----
-
-## 🖼️ OCR 图片识别功能
-
-### 功能特性
-
-- **多语言支持**：中文、英文混合识别
-- **高精度**：平均置信度 > 95%
-- **结构化输出**：返回文本、坐标、置信度
-- **自动版本管理**：每次解析生成新版本，保留历史
-
-### 使用示例
-
-**完整流程**：
-```bash
-# 1. 创建项目
-PROJECT_ID=$(curl -X POST http://localhost:8000/api/v1/projects/ \
-  -H "Content-Type: application/json" \
-  -d '{"name":"测试项目","client":"测试客户","location":"北京","status":"active"}' \
-  | jq -r '.id')
-
-# 2. 上传图片（带备注，自动路由）
-ASSET_ID=$(curl -X POST "http://localhost:8000/api/v1/assets/upload_image_with_note?project_id=$PROJECT_ID&modality=image&source=mobile&content_role=meter&auto_route=true" \
-  -F "file=@/path/to/image.jpg" \
-  -F "note=电表读数" \
-  -F "title=电表照片" \
-  | jq -r '.id')
-
-# 3. 查询资产详情（含 OCR 结果）
-curl http://localhost:8000/api/v1/assets/$ASSET_ID | jq
-```
-
-### OCR 数据结构
-
-```json
-{
-  "image_meta": {
-    "path": "data/assets/.../image.jpg"
-  },
-  "annotations": {
-    "ocr_lines": [
-      {
-        "text": "识别的文本",
-        "bbox": [[x1, y1], [x2, y2], [x3, y3], [x4, y4]],
-        "confidence": 0.98
-      }
-    ],
-    "global_tags": []
-  },
-  "derived_text": "完整文本内容",
-  "stats": {
-    "avg_confidence": 0.967,
-    "engine": "paddleocr"
-  }
-}
-```
-
-### 性能指标
-
-- **检测速度**：~0.6 秒/张
-- **识别速度**：~3.3 秒/张
-- **总耗时**：~4.2 秒/张（含路由判断）
-
----
-
-## 🤖 GLM-4V 场景问题分析
-
-### 功能特性
-
-- **智能问题诊断**：自动识别现场问题类别
-- **严重程度评估**：low/medium/high 三级评估
-- **原因分析**：提供可能的原因列表
-- **建议措施**：给出具体的改进建议
-- **置信度评分**：0.0-1.0 置信度
-
-### Worker 自动处理
-
-GLM Worker 会自动轮询待处理的图片（`content_role='scene_issue'` 且 `status=None`），调用 GLM-4V API 进行分析，并提交结果。
-
-### 使用示例
-
-```bash
-# 上传场景问题图片
-curl -X POST "http://localhost:8000/api/v1/assets/upload_image_with_note?project_id=$PROJECT_ID&modality=image&source=mobile&content_role=scene_issue" \
-  -F "file=@/path/to/scene_issue.jpg" \
-  -F "note=管道接口处有渗漏" \
-  -F "title=管道漏水"
-
-# Worker 会自动处理，或手动触发
-curl -X POST http://localhost:8000/api/v1/assets/$ASSET_ID/route_image
-```
-
-### GLM 分析结果示例
-
-```json
-{
-  "title": "制冷系统效率低下",
-  "issue_category": "冷源效率",
-  "severity": "high",
-  "summary": "冷却塔水位过高，导致换热效率下降",
-  "suspected_causes": [
-    "水位控制器故障",
-    "水位传感器失灵"
-  ],
-  "recommended_actions": [
-    "更换水位控制器",
-    "校准水位传感器"
-  ],
-  "confidence": 0.8,
-  "tags": [
-    "冷却塔",
-    "水位",
-    "效率低下"
-  ]
-}
-```
-
-### 性能指标
-
-- **API 响应时间**：~10-30 秒
-- **Worker 轮询间隔**：60 秒（可配置）
-
----
-
-## 📊 核心数据模型
-
-### 项目与空间模型
-
-- **Project（项目）**: 项目基础信息、客户、位置、类型、状态
-- **Building（建筑）**: 建筑名称、用途类型、建筑面积、建设年份、能效等级
-- **Zone（区域）**: 楼层、房间、功能区域划分
-- **BuildingSystem（系统）**: HVAC、照明、给排水、电梯等系统
-- **Device（设备）**: 冷机、风机盘管、灯具等具体设备
-
-### 多模态资产模型
-
-- **Asset（资产）**: 统一抽象的多模态数据（图片、表格、文本、音频、文档）
-- **FileBlob（文件）**: 原始文件物理存储信息
-- **AssetStructuredPayload（结构化数据）**: 解析后的结构化内容（支持多版本）
-- **AssetFeature（特征）**: 向量特征，用于语义检索（预留）
-
-### 支持的模态类型
-
-- `image` - 图片（含 OCR、目标检测）
-- `table` - 表格（能耗日志、资产盘点、巡检记录等）
-- `text` - 文本（现场记录、诊断结论等）
-- `audio` - 音频（含 ASR 转写）
-- `document` - 文档（PDF、Word 等，含章节结构）
-- `timeseries_snapshot` - 时序数据快照
 
 ---
 
@@ -569,32 +390,23 @@ curl -X POST http://localhost:8000/api/v1/assets/$ASSET_ID/route_image
 pytest tests/ -v
 
 # 运行特定标记的测试
-pytest tests/ -m unit       # 单元测试
-pytest tests/ -m integration # 集成测试
-pytest tests/ -m api        # API 测试
-
-# 生成覆盖率报告
-pytest tests/ --cov=shared --cov=services --cov-report=html
+pytest tests/ -m integration
 ```
 
 ### 测试覆盖
 
 - ✅ 项目创建 API 测试
 - ✅ 工程结构 CRUD 测试（Building/Zone/System/Device）✨
-- ✅ 工程结构树视图测试（bigtree）✨
+- ✅ 工程结构树视图测试 ✨
 - ✅ Asset-工程结构双向关联测试 ✨
-- ✅ Asset 上传 API 测试
-- ✅ PaddleOCR 流水线测试
-- ✅ GLM-4V 场景问题分析测试
-- ✅ 完整业务流程测试（创建项目 → 创建工程结构 → 上传 Asset → OCR/GLM）✨
-- ✅ PostgreSQL UUID 查询测试
-- ✅ 数据库持久化验证
+- ✅ PC UI 功能测试 ✨
+- ✅ PostgreSQL 数据库迁移验证
 
 ---
 
 ## 📈 开发路线图
 
-### 阶段 1: MVP（已完成 90% ✨）
+### 阶段 1: MVP（已完成 95% ✨）
 
 - [x] 搭建基础后端架构
 - [x] 实现健康检查接口
@@ -602,65 +414,35 @@ pytest tests/ --cov=shared --cov=services --cov-report=html
 - [x] **实现工程结构管理（Building/Zone/System/Device CRUD）✨**
 - [x] **实现工程结构树视图（bigtree）✨**
 - [x] **实现 Asset ↔ 工程结构双向关联 ✨**
-- [x] **实现 Engineer Path 自动生成 ✨**
+- [x] **实现 PC 端可视化界面（NiceGUI）✨**
+- [x] **实现项目管理条功能 ✨**
+- [x] **实现图片预览功能（修复懒加载问题）✨**
+- [x] **实现表具类型智能 LLM 结果展示 ✨**
 - [x] **支持 JSONB tags 字段 ✨**
 - [x] 实现资产管理（Asset 上传 + OCR + GLM）
 - [x] 集成 PaddleOCR 图片识别
-- [x] 实现 OCR 文本提取（第一层解析）
-- [x] 实现 GLM-4V 场景问题分析（第二层解析）
+- [x] 实现 GLM-4V 场景问题分析
 - [x] PostgreSQL 数据库迁移（SQLite → PostgreSQL 18.1）
 - [x] GLM Worker 后台自动处理
-- [x] 完整测试框架（工程结构 + Asset 集成测试）
-- [ ] 表格流水线（下一步优先级 2）
-- [ ] 诊断问题清单（下一步优先级 3）
-- [ ] 简单 PC 端浏览界面（下一步优先级 4）
-- [ ] Claude/问答入口（下一步优先级 5）
+- [x] 完整测试框架
+- [ ] 表格流水线（下一步优先级 1）
+- [ ] 诊断问题清单（下一步优先级 2）
+- [ ] Claude/问答入口（下一步优先级 3）
 
 ### 阶段 2: 多模态与专家库（未开始）
 
-- [ ] 表格解析与统计指标（夜间基载、峰值负荷等）
-- [ ] 专家规则引擎（JSONLogic / 自研 DSL）
-- [ ] Agent 工作流编排（LangChain / 自研）
+- [ ] 表格解析与统计指标
+- [ ] 专家规则引擎
+- [ ] Agent 工作流编排
 - [ ] 向量检索实现（pgvector）
-- [ ] 完整诊断流程：数据 → 规则 → 建议 → 报告
 - [ ] 时序数据管理（TimescaleDB）
 
 ### 阶段 3: 优化与扩展（未开始）
 
-- [ ] 正式 PC 前端（React + Ant Design）
+- [ ] 正式 Web 前端（React + Ant Design）
 - [ ] 扩展专家规则库
-- [ ] 手机端离线缓存
 - [ ] 性能优化（异步处理、缓存）
 - [ ] 权限控制与审计日志
-
----
-
-## 🔧 配置说明
-
-### Settings 配置类
-
-位于 `shared/config/settings.py`，使用 `lru_cache` 实现单例模式：
-
-```python
-from shared.config.settings import get_settings
-
-settings = get_settings()
-print(settings.database_url)
-```
-
-### 数据库会话
-
-位于 `shared/db/session.py`，使用 SQLAlchemy 2.0 语法：
-
-```python
-from shared.db.session import get_db
-from sqlalchemy.orm import Session
-
-@app.get("/api/v1/projects/")
-def list_projects(db: Session = Depends(get_db)):
-    projects = db.query(Project).all()
-    return projects
-```
 
 ---
 
@@ -669,31 +451,16 @@ def list_projects(db: Session = Depends(get_db)):
 ### 📖 项目文档（已中文化 ✨）
 
 **docs/ 目录**：
-- **README.md** - 文档导航索引
-- **项目总结.md** - 项目进度总结
-- **PostgreSQL迁移总结.md** - PostgreSQL 迁移完整记录
-- **API使用示例.md** - API 调用示例
-- **GLM_Worker测试报告.md** - GLM Worker 测试报告
-- **项目清理与安全加固总结.md** - 安全加固总结
-
-**GUIDEBOOK/ 目录**：
-- **README.md** - 指南文档导航索引
-- **项目规划.md** - 完整项目规划（系统架构、数据模型、实施路线）
-- **技术指南.md** - 技术深度解析（SQLAlchemy、PostgreSQL、bigtree）
-- **工程结构API设计.md** - 工程结构 API 设计文档
-- **技术栈选型.md** - 全栈技术推荐与对比
-
-**tests/ 目录**：
-- **ENGINEERING_STRUCTURE_TEST_GUIDE.md** - 工程结构测试指南
-- **ASSET_ENGINEERING_TEST_GUIDE.md** - Asset-工程结构集成测试指南
+- **00-项目总览/** - 项目总览和规划
+- **01-开发指南/** - 开发指南和测试文档
+- **02-技术文档/** - 技术深度解析
 
 ### 🔗 快速链接
 
-- 快速了解项目 → **GUIDEBOOK/项目规划.md**
-- 深入技术细节 → **GUIDEBOOK/技术指南.md**
-- API 接口设计 → **GUIDEBOOK/工程结构API设计.md**
-- 技术选型参考 → **GUIDEBOOK/技术栈选型.md**
-- 查看测试指南 → **tests/ENGINEERING_STRUCTURE_TEST_GUIDE.md**
+- 快速了解项目 → **docs/00-项目总览/项目规划.md**
+- PC UI 优化方案 → **docs/03-优化记录/pc-ui-enhancement-plan.md**
+- API 接口设计 → **docs/02-技术文档/工程结构API设计.md**
+- 测试指南 → **docs/01-开发指南/工程结构测试指南.md**
 
 ---
 
@@ -728,6 +495,7 @@ def list_projects(db: Session = Depends(get_db)):
 ## 🙏 致谢
 
 - FastAPI 框架
+- NiceGUI UI 框架
 - SQLAlchemy ORM
 - PostgreSQL 数据库
 - GLM-4V 视觉大模型（智谱 AI）
@@ -735,13 +503,15 @@ def list_projects(db: Session = Depends(get_db)):
 
 ---
 
-**最后更新**: 2026-01-20
-**当前版本**: 0.5.0
-**开发状态**: MVP 阶段 - 工程结构管理 + Asset 双向关联已完成，90% 完成度 ✨
+**最后更新**: 2026-01-21
+**当前版本**: 1.0.0
+**开发状态**: MVP 阶段 - PC 端可视化界面已完成，95% 完成度 ✨
 
 **核心里程碑**:
 - ✅ PostgreSQL 18.1 迁移完成
 - ✅ 工程结构管理 API 100% 完成
 - ✅ Asset ↔ 工程结构双向关联 100% 完成
+- ✅ PC 端可视化界面（NiceGUI）100% 完成 ✨
+- ✅ 图片预览功能优化 100% 完成 ✨
 - ✅ 文档体系全面优化（中文化）
-- 🚀 下一步：表格流水线 / 诊断清单 / PC 界面 / QA 入口
+- 🚀 下一步：表格流水线 / 诊断清单 / Claude 问答入口

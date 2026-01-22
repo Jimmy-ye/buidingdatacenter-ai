@@ -1,6 +1,6 @@
 import uuid
-from datetime import date
-from typing import Optional
+from datetime import date, datetime
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,6 +13,7 @@ class ProjectBase(BaseModel):
     status: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    tags: Optional[dict[str, Any]] = None
 
 
 class ProjectCreate(ProjectBase):
@@ -27,9 +28,14 @@ class ProjectUpdate(BaseModel):
     status: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    tags: Optional[dict[str, Any]] = None
 
 
 class ProjectRead(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    is_deleted: bool
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[str] = None
+    deletion_reason: Optional[str] = None

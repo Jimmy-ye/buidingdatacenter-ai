@@ -1,7 +1,7 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Column, Date, Float, ForeignKey, String
+from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, String, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -19,6 +19,11 @@ class Project(Base):
     status = Column(String(50), nullable=True)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
+    tags = Column(JSONB, nullable=True)
+    is_deleted = Column(Boolean, nullable=False, default=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String(100), nullable=True)
+    deletion_reason = Column(String(500), nullable=True)
 
     buildings = relationship("Building", back_populates="project", cascade="all, delete-orphan")
 
@@ -31,8 +36,8 @@ class Building(Base):
     name = Column(String(200), nullable=False)
     usage_type = Column(String(100), nullable=True)
     floor_area = Column(Float, nullable=True)
+    gfa_area = Column(Float, nullable=True)
     year_built = Column(Float, nullable=True)
-    energy_grade = Column(String(10), nullable=True)
     tags = Column(JSONB, nullable=True)
 
     project = relationship("Project", back_populates="buildings")
