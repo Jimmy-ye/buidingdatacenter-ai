@@ -105,6 +105,26 @@ except ImportError:
     extract_asset_id_from_row_click = None
 # ======================================================================
 
+# ==================== 新增：辅助函数（重构阶段 4）====================
+# 可复用的辅助函数和工具类
+# 提供通用的工具函数和业务逻辑辅助
+try:
+    from desktop.nicegui_app.helpers import (
+        parse_float as helper_parse_float,
+        format_float as helper_format_float,
+        filter_tree_nodes,
+        find_tree_node,
+    )
+    HELPERS_ENABLED = True
+except ImportError:
+    # 如果导入失败，禁用辅助函数
+    HELPERS_ENABLED = False
+    helper_parse_float = None
+    helper_format_float = None
+    filter_tree_nodes = None
+    find_tree_node = None
+# ======================================================================
+
 
 async def fetch_json(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -771,27 +791,34 @@ def main_page() -> None:
             tree_widget.update()
             return
 
-        def filter_node(node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            label = str(node.get("label") or "").lower()
-            children = node.get("children") or []
-            filtered_children: List[Dict[str, Any]] = []
-            for child in children:
-                filtered = filter_node(child)
-                if filtered is not None:
-                    filtered_children.append(filtered)
-            if text in label or filtered_children:
-                new_node = dict(node)
-                new_node["children"] = filtered_children
-                return new_node
-            return None
+        if HELPERS_ENABLED and filter_tree_nodes is not None:
+            # 使用新的辅助函数
+            filtered_nodes = filter_tree_nodes(full_tree_nodes, text)
+            tree_widget._props["nodes"] = filtered_nodes
+            tree_widget.update()
+        else:
+            # 保留旧代码作为向后兼容
+            def filter_node(node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                label = str(node.get("label") or "").lower()
+                children = node.get("children") or []
+                filtered_children: List[Dict[str, Any]] = []
+                for child in children:
+                    filtered = filter_node(child)
+                    if filtered is not None:
+                        filtered_children.append(filtered)
+                if text in label or filtered_children:
+                    new_node = dict(node)
+                    new_node["children"] = filtered_children
+                    return new_node
+                return None
 
-        filtered_roots: List[Dict[str, Any]] = []
-        for root in full_tree_nodes:
-            filtered = filter_node(root)
-            if filtered is not None:
-                filtered_roots.append(filtered)
-        tree_widget._props["nodes"] = filtered_roots
-        tree_widget.update()
+            filtered_roots: List[Dict[str, Any]] = []
+            for root in full_tree_nodes:
+                filtered = filter_node(root)
+                if filtered is not None:
+                    filtered_roots.append(filtered)
+            tree_widget._props["nodes"] = filtered_roots
+            tree_widget.update()
 
     def apply_asset_filters() -> None:
         nonlocal selected_asset
@@ -1595,16 +1622,20 @@ def main_page() -> None:
                         ui.notify("楼栋名称不能为空", color="negative")
                         return
 
-                    def parse_float(value: Any) -> Optional[float]:
-                        try:
-                            text = str(value).strip()
-                            return float(text) if text else None
-                        except Exception:
-                            return None
+                    # 使用辅助函数或内嵌函数
+                    if HELPERS_ENABLED and helper_parse_float is not None:
+                        parse_float_local = helper_parse_float
+                    else:
+                        def parse_float_local(value: Any) -> Optional[float]:
+                            try:
+                                text = str(value).strip()
+                                return float(text) if text else None
+                            except Exception:
+                                return None
 
-                    floor_area = parse_float(floor_area_input.value)
-                    gfa_area = parse_float(gfa_area_input.value)
-                    year_built = parse_float(year_built_input.value)
+                    floor_area = parse_float_local(floor_area_input.value)
+                    gfa_area = parse_float_local(gfa_area_input.value)
+                    year_built = parse_float_local(year_built_input.value)
 
                     tags_raw = (tags_input.value or "").strip()
                     tags_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
@@ -1671,20 +1702,24 @@ def main_page() -> None:
                 name_input = ui.input(label="楼栋名称", value=data.get("name") or "")
                 usage_input = ui.input(label="用途（可选）", value=data.get("usage_type") or "")
 
-                def fmt_float(v: Any) -> str:
-                    return "" if v is None else str(v)
+                # 使用辅助函数或内嵌函数
+                if HELPERS_ENABLED and helper_format_float is not None:
+                    fmt_float_local = helper_format_float
+                else:
+                    def fmt_float_local(v: Any) -> str:
+                        return "" if v is None else str(v)
 
                 floor_area_input = ui.input(
                     label="建筑面积 m²（可选）",
-                    value=fmt_float(data.get("floor_area")),
+                    value=fmt_float_local(data.get("floor_area")),
                 )
                 gfa_area_input = ui.input(
                     label="GFA 面积 m²（可选）",
-                    value=fmt_float(data.get("gfa_area")),
+                    value=fmt_float_local(data.get("gfa_area")),
                 )
                 year_built_input = ui.input(
                     label="建成年份（可选）",
-                    value=fmt_float(data.get("year_built")),
+                    value=fmt_float_local(data.get("year_built")),
                 )
 
                 tags_value = ""
@@ -1703,16 +1738,20 @@ def main_page() -> None:
                         ui.notify("楼栋名称不能为空", color="negative")
                         return
 
-                    def parse_float(value: Any) -> Optional[float]:
-                        try:
-                            text = str(value).strip()
-                            return float(text) if text else None
-                        except Exception:
-                            return None
+                    # 使用辅助函数或内嵌函数
+                    if HELPERS_ENABLED and helper_parse_float is not None:
+                        parse_float_local = helper_parse_float
+                    else:
+                        def parse_float_local(value: Any) -> Optional[float]:
+                            try:
+                                text = str(value).strip()
+                                return float(text) if text else None
+                            except Exception:
+                                return None
 
-                    floor_area = parse_float(floor_area_input.value)
-                    gfa_area = parse_float(gfa_area_input.value)
-                    year_built = parse_float(year_built_input.value)
+                    floor_area = parse_float_local(floor_area_input.value)
+                    gfa_area = parse_float_local(gfa_area_input.value)
+                    year_built = parse_float_local(year_built_input.value)
 
                     tags_raw = (tags_input.value or "").strip()
                     tags_list_local = [t.strip() for t in tags_raw.split(",") if t.strip()]
