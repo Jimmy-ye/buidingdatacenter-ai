@@ -17,6 +17,18 @@ class Settings:
         self.minio_endpoint = os.getenv("BDC_MINIO_ENDPOINT", "localhost:9000")
         self.local_storage_dir = os.getenv("BDC_LOCAL_STORAGE_DIR", "data/assets")
 
+        # JWT 配置
+        self.jwt_secret_key = os.getenv(
+            "BDC_JWT_SECRET_KEY",
+            "your-secret-key-please-change-in-production-use-openssl-rand-hex-32"
+        )
+        self.access_token_expire_minutes = int(
+            os.getenv("BDC_ACCESS_TOKEN_EXPIRE_MINUTES", "30")
+        )
+        self.refresh_token_expire_days = int(
+            os.getenv("BDC_REFRESH_TOKEN_EXPIRE_DAYS", "7")
+        )
+
 
 @lru_cache()
 def get_settings() -> Settings:
