@@ -5,6 +5,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from shared.db.base import Base
 from shared.db.session import engine
@@ -16,6 +17,19 @@ from .api.v1 import health, assets, engineering, projects
 logger = logging.getLogger("bdc_ai")
 
 app = FastAPI(title="BDC-AI Backend", version="0.1.0")
+
+# 配置 CORS 中间件 ⭐
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "*",  # 开发环境允许所有来源（生产环境应限制具体域名）
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],  # 允许所有 HTTP 方法
+    allow_headers=["*"],  # 允许所有请求头
+)
 
 
 @app.on_event("startup")

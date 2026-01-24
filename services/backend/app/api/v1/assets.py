@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Path, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from shared.config.settings import get_settings
@@ -255,6 +256,50 @@ async def get_asset(
             detail.file_path = file_blob.path
 
     return detail
+
+
+@router.get(
+    "/{asset_id}/download",
+    summary="Download raw asset file by ID",
+)
+async def download_asset_file(
+    asset_id: uuid.UUID = Path(..., description="Asset ID"),
+    db: Session = Depends(get_db),
+):
+    """Serve the underlying file for an asset.
+
+    This endpoint abstracts away the storage backend (local disk, NAS, object storage, etc.)
+    and provides a stable HTTP URL for frontends like mobile and PC UI to fetch the file.
+    """
+
+    # Convert UUID to string for SQLite compatibility
+    asset_id_str = str(asset_id)
+
+    asset = db.query(Asset).filter(Asset.id == asset_id_str).one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    if asset.file_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset has no associated file")
+
+    file_blob = db.query(FileBlob).filter(FileBlob.id == str(asset.file_id)).one_or_none()
+    if file_blob is None or not file_blob.path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File blob not found for asset")
+
+    base_dir = settings.local_storage_dir
+    abs_path = os.path.join(base_dir, file_blob.path)
+
+    if not os.path.exists(abs_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+
+    filename = os.path.basename(file_blob.path) or file_blob.file_name or str(asset.id)
+    media_type = file_blob.content_type or "application/octet-stream"
+
+    return FileResponse(
+        abs_path,
+        filename=filename,
+        media_type=media_type,
+    )
 
 
 @router.post(

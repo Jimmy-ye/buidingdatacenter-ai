@@ -886,7 +886,9 @@ class AssetDialog:
     def show_upload_image(
         self,
         project_id: str,
-        device_id: str,
+        system_id: Optional[str],
+        device_id: Optional[str],
+        zone_id: Optional[str],
         project_name: Optional[str] = None,
     ) -> None:
         """
@@ -1017,8 +1019,13 @@ class AssetDialog:
                 params: Dict[str, Any] = {
                     "project_id": str(project_id),
                     "source": "pc_upload",
-                    "device_id": str(device_id),
                 }
+                if system_id:
+                    params["system_id"] = str(system_id)
+                if device_id:
+                    params["device_id"] = str(device_id)
+                if zone_id:
+                    params["zone_id"] = str(zone_id)
                 if role_select.value:
                     params["content_role"] = role_select.value
                 if auto_route_checkbox.value:
@@ -1119,7 +1126,9 @@ class AssetDialog:
 
 def show_upload_asset_dialog(
     project_id: str,
-    device_id: str,
+    device_id: Optional[str],
+    system_id: Optional[str] = None,
+    zone_id: Optional[str] = None,
     project_name: Optional[str] = None,
     backend_base_url: str = "http://127.0.0.1:8000/api/v1",
     on_success: Optional[Callable] = None,
@@ -1140,7 +1149,7 @@ def show_upload_asset_dialog(
         backend_base_url=backend_base_url,
         on_success=on_success,
     )
-    dialog.show_upload_image(project_id, device_id, project_name=project_name)
+    dialog.show_upload_image(project_id, system_id, device_id, zone_id, project_name=project_name)
     return dialog
 
 

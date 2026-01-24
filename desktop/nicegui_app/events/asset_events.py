@@ -104,6 +104,34 @@ async def on_asset_row_click(
     if asset_id is None:
         return
 
+    # 高亮当前选中的资产行
+    # 注意：NiceGUI/QTable 期望 selected 为“行对象字典”列表，而不是行 ID 列表，
+    # 否则在内部处理 selection 事件时会出现 string indices must be integers 错误。
+    try:
+        ctx.asset_table._props.setdefault("selection", "multiple")
+
+        # 在表格当前行数据中查找对应资产 ID 的行
+        row_obj = None
+        try:
+            rows = list(getattr(ctx.asset_table, "rows", []) or [])
+        except Exception:
+            rows = []
+
+        for r in rows:
+            try:
+                if str(r.get("id")) == str(asset_id):
+                    row_obj = r
+                    break
+            except Exception:
+                continue
+
+        if row_obj is not None:
+            ctx.asset_table._props["selected"] = [row_obj]
+            ctx.asset_table.update()
+    except Exception:
+        # 高亮失败不影响后续详情加载
+        pass
+
     try:
         # 调用后端 API 获取完整资产详情
         detail = await get_asset_detail_func(str(asset_id))
@@ -185,7 +213,9 @@ async def on_run_ocr_click(
 async def on_upload_asset_click(
     ctx: AssetUIContext,
     project_id: str,
-    device_id: str,
+    system_id: Optional[str],
+    device_id: Optional[str],
+    zone_id: Optional[str],
     project_name: str,
     backend_base_url: str,
     enrich_asset_func: Callable[[Dict[str, Any]], None],
@@ -207,6 +237,8 @@ async def on_upload_asset_click(
     show_upload_asset_dialog(
         project_id=project_id,
         device_id=device_id,
+        system_id=system_id,
+        zone_id=zone_id,
         project_name=project_name,
         backend_base_url=backend_base_url,
         on_success=on_upload_success,

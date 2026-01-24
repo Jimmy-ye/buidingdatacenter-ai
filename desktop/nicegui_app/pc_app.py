@@ -27,7 +27,7 @@ BASE_ASSET_DIR = os.path.abspath(SETTINGS.local_storage_dir)
 app.add_static_files(ASSET_WEB_PREFIX, BASE_ASSET_DIR)
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.7-refactor-stage5"
+UI_VERSION = "PC UI v0.3.8-system-primary"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -130,6 +130,16 @@ async def get_structure_tree(project_id: str) -> Dict[str, Any]:
 async def list_assets_for_device(device_id: str) -> List[Dict[str, Any]]:
     """List assets for a device via the backend /assets endpoint with device_id filter."""
     return await fetch_json("/assets/", params={"device_id": device_id})
+
+
+async def list_assets_for_system(system_id: str) -> List[Dict[str, Any]]:
+    """List assets for a system via the backend /assets endpoint with system_id filter."""
+    return await fetch_json("/assets/", params={"system_id": system_id})
+
+
+async def list_assets_for_zone(zone_id: str) -> List[Dict[str, Any]]:
+    """List assets for a zone via the backend /assets endpoint with zone_id filter."""
+    return await fetch_json("/assets/", params={"zone_id": zone_id})
 
 
 async def get_asset_detail(asset_id: str) -> Dict[str, Any]:
@@ -322,7 +332,7 @@ def main_page() -> None:
 
                 with ui.row().classes("w-full q-mt-md items-start no-wrap"):
                     # 左列：资产过滤器 + 列表（略加宽，提升可读性）
-                    with ui.column().style("flex: 0 0 45%; width: 45%; min-width: 360px; overflow: hidden;"):
+                    with ui.column().style("flex: 0 0 52%; width: 52%; min-width: 380px; overflow: hidden;"):
                         ui.label("资产列表").classes("text-subtitle1")
 
                         with ui.row().classes("items-center q-mt-sm q-gutter-sm"):
@@ -364,14 +374,15 @@ def main_page() -> None:
                         asset_table = ui.table(
                             columns=table_columns,
                             rows=[],
-                        ).props('row-key="id" dense flat').classes("w-full")
+                        ).props('row-key="id" dense flat selection="multiple" show-selection').classes("w-full")
 
                         with ui.row().classes("q-mt-sm q-gutter-sm"):
                             upload_asset_button = ui.button("上传图片资产")
                             delete_asset_button = ui.button("删除选中资产", color="negative")
+                            batch_delete_button = ui.button("批量删除已选资产", color="negative").props("outline")
 
                     # 右列：资产详情 + 图片预览 + OCR/LLM 结果（固定 60% 宽度，防止内容撑开）
-                    with ui.column().style("flex: 0 0 60%; width: 60%; min-width: 0; overflow: hidden;"):
+                    with ui.column().style("flex: 0 0 48%; width: 48%; min-width: 0; overflow: hidden;"):
                         with ui.card().classes("w-full"):
                             ui.label("基本信息").classes("text-subtitle2 q-mb-sm")
                             detail_title = ui.label("资产详情").classes("text-subtitle1")
@@ -612,6 +623,11 @@ def main_page() -> None:
 
         update_asset_detail_panel(selected_asset, ui_elements)
 
+    def sync_and_update_asset_detail() -> None:
+        nonlocal selected_asset
+        selected_asset = asset_state_ref.selected_asset
+        update_asset_detail()
+
     def apply_tree_filter() -> None:
         """根据搜索框过滤工程结构树。"""
         text = (tree_search.value or "").strip().lower()
@@ -727,28 +743,69 @@ def main_page() -> None:
             zone_add_btn.enable()
             node_edit_btn.enable()
             node_delete_btn.enable()
-        elif node_type == "system" and raw_id:
-            # 系统节点：可以在其下创建设备
-            device_add_btn.enable()
 
-        # 只有在设备节点上才触发资产加载
-        if node_type != "device" or not raw_id:
+            # 切换到楼栋视角时清空资产列表
+            all_assets_for_device.clear()
+            asset_table.rows = []
+            asset_table.update()
+            selected_asset = None
+            update_asset_detail()
             return
 
-        device_id = raw_id
-        current_device_id = device_id
-        try:
-            assets = await list_assets_for_device(device_id)
-            all_assets_for_device.clear()
-            for a in assets:
-                enrich_asset(a)
-                all_assets_for_device.append(a)
-            apply_asset_filters()
-            loading_label.text = ""
-        except Exception:
-            # 资产列表加载失败时提示用户，但不抛异常
-            ui.notify("加载设备资产失败，请稍后重试", color="negative")
-            loading_label.text = "资产加载失败，请检查后端服务"
+        if node_type == "system" and raw_id:
+            # 系统节点：可以在其下创建设备
+            device_add_btn.enable()
+            current_device_id = None
+            try:
+                assets = await list_assets_for_system(raw_id)
+                all_assets_for_device.clear()
+                for a in assets:
+                    enrich_asset(a)
+                    all_assets_for_device.append(a)
+                apply_asset_filters()
+                loading_label.text = ""
+            except Exception:
+                ui.notify("加载系统资产失败，请稍后重试", color="negative")
+                loading_label.text = "资产加载失败，请检查后端服务"
+            return
+
+        if node_type == "zone" and raw_id:
+            try:
+                assets = await list_assets_for_zone(raw_id)
+                all_assets_for_device.clear()
+                for a in assets:
+                    enrich_asset(a)
+                    all_assets_for_device.append(a)
+                apply_asset_filters()
+                loading_label.text = ""
+            except Exception:
+                ui.notify("加载区域资产失败，请稍后重试", color="negative")
+                loading_label.text = "资产加载失败，请检查后端服务"
+            return
+
+        if node_type == "device" and raw_id:
+            device_id = raw_id
+            current_device_id = device_id
+            try:
+                assets = await list_assets_for_device(device_id)
+                all_assets_for_device.clear()
+                for a in assets:
+                    enrich_asset(a)
+                    all_assets_for_device.append(a)
+                apply_asset_filters()
+                loading_label.text = ""
+            except Exception:
+                # 资产列表加载失败时提示用户，但不抛异常
+                ui.notify("加载设备资产失败，请稍后重试", color="negative")
+                loading_label.text = "资产加载失败，请检查后端服务"
+            return
+
+        # 其他节点类型：清空资产视图
+        all_assets_for_device.clear()
+        asset_table.rows = []
+        asset_table.update()
+        selected_asset = None
+        update_asset_detail()
 
     tree_widget.on_select(on_select_tree)
 
@@ -782,7 +839,7 @@ def main_page() -> None:
                 e=e,
                 get_asset_detail_func=get_asset_detail,
                 enrich_asset_func=enrich_asset,
-                update_detail_func=update_asset_detail,
+                update_detail_func=sync_and_update_asset_detail,
                 on_preview_func=on_preview_click,
             )
 
@@ -848,7 +905,7 @@ def main_page() -> None:
             backend_base_url=BACKEND_BASE_URL,
             get_asset_detail_func=get_asset_detail,
             enrich_asset_func=enrich_asset,
-            update_detail_func=update_asset_detail,
+            update_detail_func=sync_and_update_asset_detail,
         )
 
         # 同步 state_ref 到旧变量（向后兼容）
@@ -863,7 +920,7 @@ def main_page() -> None:
             backend_base_url=BACKEND_BASE_URL,
             get_asset_detail_func=get_asset_detail,
             enrich_asset_func=enrich_asset,
-            update_detail_func=update_asset_detail,
+            update_detail_func=sync_and_update_asset_detail,
         )
 
         # 同步 state_ref 到旧变量（向后兼容）
@@ -880,13 +937,24 @@ def main_page() -> None:
         if not project_select.value:
             ui.notify("请先选择项目", color="warning")
             return
-        if not current_device_id:
-            ui.notify("请先在左侧工程结构中选择一个设备节点", color="warning")
+
+        if current_tree_node_type not in {"system", "device", "zone"} or not current_tree_node_id:
+            ui.notify("请先在左侧工程结构中选择系统、设备或区域节点", color="warning")
             return
 
         project_id = str(project_select.value)
-        device_id = str(current_device_id)
         project_name = project_select.options.get(project_select.value, project_select.value)
+
+        system_id: Optional[str] = None
+        device_id: Optional[str] = None
+        zone_id: Optional[str] = None
+
+        if current_tree_node_type == "system":
+            system_id = str(current_tree_node_id)
+        elif current_tree_node_type == "device":
+            device_id = str(current_tree_node_id)
+        elif current_tree_node_type == "zone":
+            zone_id = str(current_tree_node_id)
 
         # 在调用前，将当前资产列表同步到 state_ref，避免丢失已有资产
         asset_state_ref.all_assets_for_device = list(all_assets_for_device)
@@ -894,7 +962,9 @@ def main_page() -> None:
         await on_upload_asset_click_handler(
             ctx=asset_ui_context,
             project_id=project_id,
+            system_id=system_id,
             device_id=device_id,
+            zone_id=zone_id,
             project_name=project_name,
             backend_base_url=BACKEND_BASE_URL,
             enrich_asset_func=enrich_asset,
@@ -922,6 +992,58 @@ def main_page() -> None:
         selected_asset = asset_state_ref.selected_asset
         all_assets_for_device.clear()
         all_assets_for_device.extend(asset_state_ref.all_assets_for_device or [])
+
+    async def on_batch_delete_assets_click() -> None:
+        """批量删除当前表格中勾选的资产。"""
+        nonlocal selected_asset, all_assets_for_device
+
+        selected_items = asset_table._props.get("selected") or []
+        selected_ids: List[str] = []
+        for item in selected_items:
+            if isinstance(item, dict):
+                value = item.get("id")
+            else:
+                value = item
+            if value:
+                selected_ids.append(str(value))
+
+        if not selected_ids:
+            ui.notify("请先在表格中勾选要删除的资产", color="warning")
+            return
+
+        to_delete = set(selected_ids)
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                for asset_id in selected_ids:
+                    try:
+                        resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id}")
+                        resp.raise_for_status()
+                    except Exception as exc:  # noqa: BLE001
+                        ui.notify(f"删除资产 {asset_id} 失败: {exc}", color="negative")
+
+        except Exception as exc:  # noqa: BLE001
+            ui.notify(f"批量删除请求失败: {exc}", color="negative")
+            return
+
+        # 本地列表中过滤掉已删除资产
+        all_assets_for_device = [
+            a for a in (all_assets_for_device or [])
+            if str(a.get("id")) not in to_delete
+        ]
+        asset_state_ref.all_assets_for_device = list(all_assets_for_device)
+
+        # 如果当前选中资产已被删除，清空选中
+        if selected_asset and str(selected_asset.get("id")) in to_delete:
+            selected_asset = None
+            asset_state_ref.selected_asset = None
+
+        # 清空表格选中状态
+        asset_table._props["selected"] = []
+        asset_table.update()
+
+        apply_asset_filters()
+        ui.notify(f"已删除 {len(to_delete)} 个资产", color="positive")
 
     async def on_create_building_click() -> None:
         """创建楼栋点击事件（使用新的对话框组件）"""
@@ -1016,12 +1138,19 @@ def main_page() -> None:
     device_add_btn.on_click(on_create_device_click)
     upload_asset_button.on_click(on_upload_asset_click)
     delete_asset_button.on_click(on_delete_asset_click)
+    batch_delete_button.on_click(on_batch_delete_assets_click)
     building_add_btn.on_click(on_create_building_click)
     node_edit_btn.on_click(on_edit_node_click)
     node_delete_btn.on_click(on_delete_node_click)
 
     async def on_preview_click() -> None:
-        """在右侧详情卡片中预览图片，使用 HTTP URL 快速加载。"""
+        """在右侧详情卡片中预览图片，统一使用后端下载端点。
+
+        优先使用后端 future 的 download_url 字段；如果不存在，则
+        回退到 {BACKEND_BASE_URL}/assets/{id}/download。
+        这样可以屏蔽本地磁盘 / NAS / 对象存储的差异，PC 与移动端共享同一访问方式。
+        """
+
         if not selected_asset:
             ui.notify("请先选择一个资产", color="warning")
             return
@@ -1031,42 +1160,27 @@ def main_page() -> None:
             ui.notify("当前资产不是图片，无法预览", color="warning")
             return
 
-        rel_path = selected_asset.get("file_path")
-        if not rel_path:
-            ui.notify("该资产缺少文件路径信息", color="warning")
+        asset_id = selected_asset.get("id")
+        if not asset_id:
+            ui.notify("资产ID缺失，无法预览图片", color="negative")
             return
 
-        # 路径安全检查
-        base_dir = os.path.abspath(SETTINGS.local_storage_dir)
-        abs_path = os.path.abspath(os.path.join(base_dir, str(rel_path)))
+        # 优先使用后端直接提供的 download_url，其次回退到统一下载地址
+        direct_url = selected_asset.get("download_url") or selected_asset.get("raw_url")
+        if isinstance(direct_url, str) and direct_url.startswith("http"):
+            url = direct_url
+        elif isinstance(direct_url, str) and direct_url.startswith("/"):
+            # 相对路径，拼到 BACKEND_BASE_URL 前
+            url = f"{BACKEND_BASE_URL}{direct_url}"
+        else:
+            url = f"{BACKEND_BASE_URL}/assets/{asset_id}/download"
 
-        try:
-            common = os.path.commonpath([base_dir, abs_path])
-        except ValueError:
-            ui.notify("文件路径不合法", color="negative")
-            return
-
-        if common != base_dir:
-            ui.notify("文件路径不合法", color="negative")
-            return
-
-        if not os.path.exists(abs_path):
-            ui.notify("本地文件不存在，请检查后端存储目录", color="negative")
-            return
-
-        # 使用 HTTP URL 而不是 Data URL（性能更好，支持大文件）
-        # URL 格式：/local_assets/项目ID/设备ID/文件名.png
-        # 注意：需要将 Windows 路径的 \ 替换为 /
-        url_path = rel_path.replace("\\", "/")
-        preview_image.source = f"/local_assets/{url_path}"
+        preview_image.source = url
         preview_image.visible = True
 
-        print(f"[DEBUG] 预览图片: {rel_path}")
-        print(f"[DEBUG] URL 路径: {url_path}")
-        print(f"[DEBUG] 完整 URL: {preview_image.source}")
-        print(f"[DEBUG] 文件存在: {os.path.exists(abs_path)}")
-        print(f"[DEBUG] 静态目录: {SETTINGS.local_storage_dir}")
-        ui.notify("图片已加载", color="positive")
+        print(f"[DEBUG] 预览图片 asset_id={asset_id}")
+        print(f"[DEBUG] 预览 URL: {preview_image.source}")
+        ui.notify("图片已通过后端下载端点加载", color="positive")
 
     async def on_open_file_click() -> None:
         """在本机打开原始文件。仅适用于本地环境，带路径安全检查。"""
