@@ -64,3 +64,8 @@ Thumbs.db
 
 # Windsurf IDE
 .windsurfrules
+
+# 开发脚本（本地环境配置）
+*.bat
+stop_services.py
+nul
