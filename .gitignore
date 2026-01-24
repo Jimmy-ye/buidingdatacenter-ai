@@ -69,3 +69,6 @@ Thumbs.db
 *.bat
 stop_services.py
 nul
+
+# 移动端临时文件（不应提交）
+mobile/lib/
