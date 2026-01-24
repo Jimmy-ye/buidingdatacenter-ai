@@ -80,6 +80,26 @@ class BuildingRead(BuildingBase):
 - `name_contains: str | None` - 按名称模糊搜索
 - `tags: str | None` - 按标签筛选（逗号分隔，AND 逻辑）
 
+### 1.4 默认系统模板（新建 Building 后）
+
+为降低工程录入成本，推荐在创建 Building 后自动生成一批基础系统：
+
+- 围护结构（`type="envelope"`）
+- 制冷（`type="cooling"`）
+- 制热（`type="heating"`）
+- 空调末端（`type="terminal_hvac"`）
+- 照明（`type="lighting"`）
+- 电梯（`type="elevator"`）
+- 动力（`type="power"`）
+- 电力监控（`type="ems"`）
+- 能管平台（`type="energy_platform"`）
+
+业务约定：
+
+- 当后端启用默认系统模板时，`POST /api/v1/projects/{project_id}/buildings` 成功返回后，应在对应 `building_id` 下自动插入上述若干 `BuildingSystem` 记录。
+- 默认系统的 `name` 通常与中文名称一致，`type` 字段使用稳定的英文/代码，用于前后端逻辑判断与过滤。
+- 后续可通过 `PATCH /api/v1/systems/{system_id}` 对名称、描述、标签进行细化调整，或通过 `POST /api/v1/buildings/{building_id}/systems` 增补自定义系统。
+
 ---
 
 ## 2. Zone（区域/分区）
@@ -626,6 +646,30 @@ GET /api/v1/devices/{device_id}/assets/summary
 ---
 
 ## 7. 与 Asset 的协同
+
+### 7.0 工程实体与资产挂接关系总览
+
+- **主挂接点：System**
+  - 每个 Asset 理论上应能解析到一个所在的 System（功能归属）。
+  - 新资产创建时，如果提供 `device_id`，后端通过 `_resolve_engineering_hierarchy` 自动反推该设备所属的 System，并写入 `asset.system_id`。
+  - 如果直接提供 `system_id`（例如系统级上传），则以该字段作为主挂接点。
+
+- **可选挂接点：Device**
+  - `asset.device_id` 是可选的，用于指向具体设备（铭牌、现场问题、能耗表等贴在单台设备上的资料）。
+  - 缺省情况下，系统级资料（系统原理图、配电一次图等）可以只挂在 `system_id` 上，不必绑定具体设备。
+
+- **位置属性：Zone / Building**
+  - `asset.building_id`、`asset.zone_id` 表示物理位置维度：在哪栋楼、哪一层/哪一区域。
+  - 若只提供 `device_id`，后端会依据设备上的 `zone_id`、所属 System 的 `building_id` 自动补全这两个字段。
+
+- **统一解析函数 `_resolve_engineering_hierarchy`**
+  - 入参：`project_id, building_id, zone_id, system_id, device_id`（部分可空）。
+  - 责任：
+    - 校验所有 ID 是否存在且层级一致（Device → System → Building，Zone → Building）。
+    - 在只提供部分 ID（如仅 device_id 或仅 system_id）时，自动推导缺失的层级。
+    - 返回实体对象和 `engineer_path` 字符串，便于前端展示和追踪。
+
+> 总结：**System 是资产的主挂接维度，Device/Zone 是可选的细化维度**。这样既支持系统级视图，又保留到单台设备和具体区域的下钻能力。
 
 ### 7.1 工程路径生成
 
