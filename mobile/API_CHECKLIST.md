@@ -125,23 +125,12 @@
 |------|----------|------|
 | 项目列表 | `GET /api/v1/projects/` | ✅ |
 | 工程结构树 | `GET /api/v1/projects/{id}/structure_tree` | ✅ |
-| 设备资产列表 | `GET /api/v1/assets/?device_id={id}` | ✅ |
-| 上传图片+备注 | `POST /api/v1/assets/upload_image_with_note` | ✅ |
+| 设备资产列表（设备视图） | `GET /api/v1/assets/?device_id={id}` | ✅ |
+| 系统资产列表（系统视图） | `GET /api/v1/assets/?system_id={id}` | ✅ |
+| 上传图片+备注（设备级或系统级，使用 device_id 或 system_id） | `POST /api/v1/assets/upload_image_with_note` | ✅ |
 
 **结论**：所有移动端开发需要的 API 都已完整！ ✅
 
----
-
-## 🔧 修复记录
-
-### 问题：404 Not Found on GET /api/v1/projects/
-
-**原因**：在 PC UI 架构重构（提交 9b5cee1）时，`projects.py` 被误删除。
-
-**修复**：
-1. ✅ 重新创建 `services/backend/app/api/v1/projects.py`
-2. ✅ 更新 `services/backend/app/main.py` 注册路由
-3. ✅ 功能增强：添加更多过滤参数
 
 **修复时间**：2026-01-23
 
