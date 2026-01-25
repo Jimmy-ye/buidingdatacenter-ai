@@ -370,7 +370,7 @@ class _AssetsPageState extends State<AssetsPage> {
 
       // 调用 Provider 上传
       final provider = context.read<AssetProvider>();
-      await provider.uploadImage(
+      final asset = await provider.uploadImage(
         projectId: projectId,
         deviceId: deviceId,
         systemId: systemId,
@@ -393,6 +393,34 @@ class _AssetsPageState extends State<AssetsPage> {
             backgroundColor: Colors.green,
           ),
         );
+      }
+
+      // 如果开启了自动解析，则在后台轮询 LLM 结果
+      if (autoRoute && asset.id.isNotEmpty && context.mounted) {
+        // 不阻塞当前函数，直接在异步任务中轮询
+        unawaited(() async {
+          final detail = await provider.waitForLlmResult(asset.id);
+
+          if (!context.mounted) return;
+
+          if (detail != null &&
+              detail.llmSummary != null &&
+              detail.llmSummary!.isNotEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('LLM 分析已完成，可点击照片查看详情'),
+                backgroundColor: Colors.blue,
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('LLM 分析仍在进行中，稍后可在详情中查看'),
+                backgroundColor: Colors.grey,
+              ),
+            );
+          }
+        }());
       }
     } catch (e) {
       debugPrint('上传失败: $e');

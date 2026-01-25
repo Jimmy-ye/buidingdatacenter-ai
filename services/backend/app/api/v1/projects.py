@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from shared.db.session import get_db
 from shared.db.models_project import Project
+from shared.db.models_auth import User
+from shared.security.dependencies import get_current_user
 from ...schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
 
 
@@ -29,6 +31,7 @@ async def list_projects(
     name_contains: Optional[str] = Query(default=None, description="Filter by project name (partial match)"),
     include_deleted: bool = Query(default=False, description="Include soft-deleted projects"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> List[ProjectRead]:
     """List all projects with optional filters.
 
@@ -74,6 +77,7 @@ async def list_projects(
 async def get_project(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ProjectRead:
     """Get a specific project by ID."""
     project = db.query(Project).filter(Project.id == project_id).one_or_none()
@@ -96,6 +100,7 @@ async def get_project(
 async def create_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ProjectRead:
     """Create a new project."""
     project = Project(**payload.model_dump())
@@ -115,6 +120,7 @@ async def update_project(
     project_id: uuid.UUID,
     payload: ProjectUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ProjectRead:
     """Update an existing project."""
     project = db.query(Project).filter(Project.id == project_id).one_or_none()
@@ -144,6 +150,7 @@ async def update_project(
 async def delete_project(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> None:
     """Soft delete a project (marks as deleted but keeps in database)."""
     project = db.query(Project).filter(Project.id == project_id).one_or_none()
