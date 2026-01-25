@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../models/asset.dart';
@@ -246,6 +247,30 @@ class AssetProvider extends ChangeNotifier {
       debugPrint('获取资产详情失败: $e');
       rethrow;
     }
+  }
+
+  /// 轮询等待 LLM 结果就绪
+  Future<Asset?> waitForLlmResult(
+    String assetId, {
+    int maxAttempts = 6,
+    Duration interval = const Duration(seconds: 5),
+  }) async {
+    for (var i = 0; i < maxAttempts; i++) {
+      try {
+        final detail = await getAssetDetail(assetId);
+        if (detail.llmSummary != null && detail.llmSummary!.isNotEmpty) {
+          return detail;
+        }
+      } catch (e) {
+        debugPrint('轮询 LLM 结果失败: $e');
+      }
+
+      if (i < maxAttempts - 1) {
+        await Future.delayed(interval);
+      }
+    }
+
+    return null;
   }
 
   /// 删除资产⭐

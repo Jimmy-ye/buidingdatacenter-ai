@@ -10,6 +10,9 @@ python-multipart==0.0.6
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.1.1
+# 邮箱验证（Pydantic EmailStr 类型需要）
+email-validator==2.1.0
+dnspython==2.8.0
 # OCR
 PaddleOCR==2.7.0.3
 bigtree==0.16.4
