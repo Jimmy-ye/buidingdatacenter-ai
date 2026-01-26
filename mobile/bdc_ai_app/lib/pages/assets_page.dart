@@ -398,7 +398,7 @@ class _AssetsPageState extends State<AssetsPage> {
       // 如果开启了自动解析，则在后台轮询 LLM 结果
       if (autoRoute && asset.id.isNotEmpty && context.mounted) {
         // 不阻塞当前函数，直接在异步任务中轮询
-        unawaited(() async {
+        (() async {
           final detail = await provider.waitForLlmResult(asset.id);
 
           if (!context.mounted) return;
@@ -420,7 +420,7 @@ class _AssetsPageState extends State<AssetsPage> {
               ),
             );
           }
-        }());
+        })();
       }
     } catch (e) {
       debugPrint('上传失败: $e');

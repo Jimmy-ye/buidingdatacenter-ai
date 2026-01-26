@@ -52,7 +52,7 @@ def get_auth_manager():
     return _auth_manager_instance
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.8-system-primary"
+UI_VERSION = "PC UI v0.3.9-permission-fix"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -368,11 +368,16 @@ def main_page() -> None:
             tree_widget = ui.tree([]).props("node-key=id")
 
             # 初始时禁用依赖树节点类型的按钮，避免误操作
-            system_add_btn.disable()
-            zone_add_btn.disable()
-            device_add_btn.disable()
-            node_edit_btn.disable()
-            node_delete_btn.disable()
+            if system_add_btn:
+                system_add_btn.disable()
+            if zone_add_btn:
+                zone_add_btn.disable()
+            if device_add_btn:
+                device_add_btn.disable()
+            if node_edit_btn:
+                node_edit_btn.disable()
+            if node_delete_btn:
+                node_delete_btn.disable()
 
         # 右侧：顶部项目信息 + 资产列表 / 详情两列布局
         with ui.column().style("flex-grow: 1; height: 100%; overflow: auto;"):
