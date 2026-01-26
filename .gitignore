@@ -73,3 +73,19 @@ nul
 
 # 移动端临时文件（不应提交）
 mobile/lib/
+
+# 临时文件和日志
+*.tmp
+*.bak
+=*
+*=*
+*pip-install*
+*.egg-info/
+dist/
+build/
+
+# 服务部署和状态文件
+services/worker/WORKER_DEPLOYMENT.md
+*_DEPLOYMENT.md
+*_STATUS.md
+SYNC_STATUS.md

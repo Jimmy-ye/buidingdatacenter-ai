@@ -851,7 +851,6 @@ def main_page() -> None:
     asset_table.on(
         "rowClick",
         make_asset_row_click_handler(),
-        js_handler="(evt, row, index) => emit(row)",
     )
 
     refresh_button.on_click(on_refresh_click)
