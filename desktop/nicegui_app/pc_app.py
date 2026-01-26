@@ -22,6 +22,11 @@ from shared.config.settings import get_settings
 from desktop.nicegui_app.config import Config
 from desktop.nicegui_app.ui.login_page import show_login_page
 
+# 导入 401 测试页面（仅在开发环境）
+import os
+if os.getenv('ENVIRONMENT', 'development') == 'development':
+    from desktop.nicegui_app.test_401_page import register_401_test_route
+
 BACKEND_BASE_URL = Config.get_api_base_url()
 SETTINGS = get_settings()
 ASSET_WEB_PREFIX = "/local_assets"
@@ -1298,6 +1303,14 @@ def index_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
+    # 注册 401 测试页面（仅在开发环境）
+    if os.getenv('ENVIRONMENT', 'development') == 'development':
+        try:
+            register_401_test_route()
+            print("[INFO] 401 测试页面已启用: http://localhost:8080/test-401")
+        except Exception as e:
+            print(f"[WARNING] 无法注册 401 测试页面: {e}")
+
     # storage_secret 用于会话持久化（认证 Token）
     ui.run(
         title="BDC-AI 工程结构与资产浏览",
