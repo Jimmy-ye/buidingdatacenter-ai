@@ -23,17 +23,13 @@ from desktop.nicegui_app.config import Config
 from desktop.nicegui_app.ui.login_page import show_login_page
 
 # ============================================================
-# 开发工具：401 自动处理测试页面（仅开发环境）
-# 用途：测试认证系统的 401 错误自动处理机制
-# 访问：
-#   - http://localhost:8080/test-401 (场景测试)
-#   - http://localhost:8080/test-401-direct (调试测试)
-# 生产环境：这些页面不会被加载
+# 开发工具：测试页面（仅开发环境）
 # ============================================================
 import os
 if os.getenv('ENVIRONMENT', 'development') == 'development':
     from desktop.nicegui_app.test_401_page import register_401_test_route
     from desktop.nicegui_app.test_401_direct import register_direct_test_route
+    from desktop.nicegui_app.test_refresh_page import register_refresh_test_route
 
 BACKEND_BASE_URL = Config.get_api_base_url()
 SETTINGS = get_settings()
@@ -1312,15 +1308,17 @@ def index_page() -> None:
 
 if __name__ in {"__main__", "__mp_main__"}:
     # ============================================================
-    # 开发工具：注册 401 测试页面（仅开发环境）
+    # 开发工具：注册测试页面（仅开发环境）
     # ============================================================
     if os.getenv('ENVIRONMENT', 'development') == 'development':
         try:
             register_401_test_route()
             register_direct_test_route()
+            register_refresh_test_route()
             print("[INFO] 开发工具已启用:")
             print("       - http://localhost:8080/test-401 (401 场景测试)")
             print("       - http://localhost:8080/test-401-direct (401 调试测试)")
+            print("       - http://localhost:8080/test-refresh (Refresh Token 测试)")
         except Exception as e:
             print(f"[WARNING] 无法注册开发工具: {e}")
 
