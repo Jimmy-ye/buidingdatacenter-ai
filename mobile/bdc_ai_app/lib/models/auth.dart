@@ -28,7 +28,7 @@ class TokenResponse {
   }
 
   Map<String, dynamic> toJson() {
-    final json = {
+    final Map<String, dynamic> json = {
       'access_token': accessToken,
       'refresh_token': refreshToken,
       'token_type': tokenType,
