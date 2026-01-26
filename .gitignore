@@ -86,6 +86,20 @@ nul
 # 移动端临时文件（不应提交）
 mobile/lib/
 
+# Flutter/Dart 临时文件
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+mobile/bdc_ai_app/.dart_tool/
+mobile/bdc_ai_app/build/
+mobile/bdc_ai_app/.flutter-plugins
+mobile/bdc_ai_app/.flutter-plugins-dependencies
+mobile/bdc_ai_app/.packages
+
 # 临时文件和日志
 *.tmp
 *.bak
