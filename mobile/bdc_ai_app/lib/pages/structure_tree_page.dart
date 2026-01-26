@@ -4,6 +4,7 @@ import '../models/structure.dart';
 import '../providers/structure_provider.dart';
 import '../providers/app_provider.dart';
 import '../providers/asset_provider.dart';
+import '../services/auth_service.dart';
 
 /// 工程结构树页面
 ///
@@ -87,6 +88,27 @@ class _StructureTreePageState extends State<StructureTreePage> {
         'targetId': system.id,
         'name': system.name,
       },
+    );
+  }
+
+  /// 显示添加设备对话框
+  void _showAddDeviceDialog(System system) {
+    final authService = AuthService();
+
+    // 检查权限
+    if (!authService.hasPermission('structures:create')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('权限不足：需要 structures:create 权限'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AddDeviceDialog(system: system),
     );
   }
 
@@ -218,6 +240,7 @@ class _StructureTreePageState extends State<StructureTreePage> {
                   onDeviceTap: _openDeviceAssets,
                   onSystemTap: _openSystemAssets,
                   provider: provider,
+                  onAddDevice: _showAddDeviceDialog,
                 );
               },
             ),
@@ -236,6 +259,7 @@ class BuildingNode extends StatelessWidget {
   final Function(Device) onDeviceTap;
   final Function(System) onSystemTap;
   final StructureProvider provider;
+  final Function(System)? onAddDevice; // ⭐ 添加设备回调
 
   const BuildingNode({
     super.key,
@@ -245,6 +269,7 @@ class BuildingNode extends StatelessWidget {
     required this.onDeviceTap,
     required this.onSystemTap,
     required this.provider,
+    this.onAddDevice,
   });
 
   @override
@@ -277,6 +302,7 @@ class BuildingNode extends StatelessWidget {
                 onToggle: () => provider.toggleSystem(system.id),
                 onDeviceTap: onDeviceTap,
                 onSystemTap: onSystemTap,
+                onAddDevice: onAddDevice,
               );
             }),
 
@@ -348,6 +374,7 @@ class SystemNode extends StatelessWidget {
   final VoidCallback onToggle;
   final Function(Device) onDeviceTap;
   final Function(System) onSystemTap;
+  final Function(System)? onAddDevice; // ⭐ 添加设备回调
 
   const SystemNode({
     super.key,
@@ -356,6 +383,7 @@ class SystemNode extends StatelessWidget {
     required this.onToggle,
     required this.onDeviceTap,
     required this.onSystemTap,
+    this.onAddDevice,
   });
 
   @override
@@ -409,6 +437,16 @@ class SystemNode extends StatelessWidget {
                         ],
                       ),
                     ),
+                    /// ⭐ 添加设备按钮
+                    if (onAddDevice != null)
+                      IconButton(
+                        icon: const Icon(Icons.add_circle_outline),
+                        onPressed: () => onAddDevice?.call(system),
+                        tooltip: '添加设备',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        iconSize: 20,
+                      ),
                     if (system.devices.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -634,6 +672,216 @@ class ZoneInfoTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 添加设备对话框
+class AddDeviceDialog extends StatefulWidget {
+  final System system;
+
+  const AddDeviceDialog({
+    super.key,
+    required this.system,
+  });
+
+  @override
+  State<AddDeviceDialog> createState() => _AddDeviceDialogState();
+}
+
+class _AddDeviceDialogState extends State<AddDeviceDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _modelController = TextEditingController();
+  final _deviceTypeController = TextEditingController();
+  final _ratedPowerController = TextEditingController();
+  final _serialNoController = TextEditingController();
+  final _tagsController = TextEditingController();
+
+  bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _modelController.dispose();
+    _deviceTypeController.dispose();
+    _ratedPowerController.dispose();
+    _serialNoController.dispose();
+    _tagsController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final appProvider = context.read<AppProvider>();
+      final structureProvider = context.read<StructureProvider>();
+      final projectId = appProvider.getCurrentProjectId();
+
+      // 解析标签
+      final tags = _tagsController.text.isNotEmpty
+          ? _tagsController.text.split(',').map((e) => e.trim()).toList()
+          : null;
+
+      // 创建设备请求
+      final deviceCreate = DeviceCreate(
+        model: _modelController.text.trim(),
+        deviceType: _deviceTypeController.text.trim().isEmpty
+            ? null
+            : _deviceTypeController.text.trim(),
+        ratedPower: _ratedPowerController.text.trim().isEmpty
+            ? null
+            : double.tryParse(_ratedPowerController.text.trim()),
+        serialNo: _serialNoController.text.trim().isEmpty
+            ? null
+            : _serialNoController.text.trim(),
+        tags: tags,
+      );
+
+      // 调用 Provider 创建设备
+      await structureProvider.createDevice(
+        widget.system.id,
+        deviceCreate,
+        projectId,
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('设备创建成功'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('创建失败: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          const Icon(Icons.add_circle_outline),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('添加设备'),
+                Text(
+                  '系统: ${widget.system.name}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 型号（必填）
+              TextFormField(
+                controller: _modelController,
+                decoration: const InputDecoration(
+                  labelText: '型号 *',
+                  hintText: '例如: FCU-03',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '请输入设备型号';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+
+              // 设备类型（可选）
+              TextFormField(
+                controller: _deviceTypeController,
+                decoration: const InputDecoration(
+                  labelText: '设备类型',
+                  hintText: '例如: fcu, chiller, pump',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // 额定功率（可选）
+              TextFormField(
+                controller: _ratedPowerController,
+                decoration: const InputDecoration(
+                  labelText: '额定功率（kW）',
+                  hintText: '例如: 5.5',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+
+              // 序列号（可选）
+              TextFormField(
+                controller: _serialNoController,
+                decoration: const InputDecoration(
+                  labelText: '序列号',
+                  hintText: '设备序列号（可选）',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // 标签（可选）
+              TextFormField(
+                controller: _tagsController,
+                decoration: const InputDecoration(
+                  labelText: '标签',
+                  hintText: '多个标签用逗号分隔',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        ElevatedButton(
+          onPressed: _isLoading ? null : _submit,
+          child: _isLoading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('创建'),
+        ),
+      ],
     );
   }
 }

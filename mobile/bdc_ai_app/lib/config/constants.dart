@@ -1,7 +1,9 @@
+import 'app_config.dart' as app_config;
+
 /// 应用配置常量
 class AppConfig {
-  /// API 基础 URL
-  static const String baseUrl = 'http://localhost:8000';
+  /// API 基础 URL（从 app_config 读取）
+  static String get baseUrl => app_config.AppConfig.apiBaseUrl;
 
   /// API 超时时间（毫秒）
   static const int apiTimeout = 30000;
@@ -38,4 +40,7 @@ class ApiEndpoints {
 
   /// 健康检查
   static const String health = '/api/v1/health/';
+
+  /// 创建设备
+  static String createDevice(String systemId) => '/api/v1/systems/$systemId/devices';
 }

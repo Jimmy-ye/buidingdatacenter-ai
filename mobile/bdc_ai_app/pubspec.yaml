@@ -37,6 +37,7 @@ dependencies:
 
   # HTTP 客户端
   http: ^1.2.0
+  dio: ^5.4.0
 
   # 状态管理
   provider: ^6.1.1
@@ -55,6 +56,9 @@ dependencies:
 
   # 共享偏好（离线缓存）
   shared_preferences: ^2.2.2
+
+  # 安全存储（Token 存储）
+  flutter_secure_storage: ^9.0.0
 
 dev_dependencies:
   flutter_test:
