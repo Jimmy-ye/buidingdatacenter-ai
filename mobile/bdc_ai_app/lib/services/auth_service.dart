@@ -192,26 +192,28 @@ class AuthService {
   /// 用户登录
   Future<UserInfo> login(String username, String password) async {
     try {
+      // 步骤 1：登录获取 Token
       final response = await _dio.post(
         '/auth/login',
         data: LoginRequest(username: username, password: password).toJson(),
       );
 
-      final tokenResponse = TokenResponse.fromJson(response.data);
+      // 手动解析 Token（后端不返回用户信息）
+      final tokenData = response.data as Map<String, dynamic>;
+      final accessToken = tokenData['access_token'] as String;
+      final refreshToken = tokenData['refresh_token'] as String;
 
       // 存储 Token
-      await _secureStorage.write(key: 'access_token', value: tokenResponse.accessToken);
-      await _secureStorage.write(key: 'refresh_token', value: tokenResponse.refreshToken);
+      await _secureStorage.write(key: 'access_token', value: accessToken);
+      await _secureStorage.write(key: 'refresh_token', value: refreshToken);
+      _currentAccessToken = accessToken;
 
       // 存储 Token 过期时间（15分钟）
       final expiryTime = DateTime.now().add(const Duration(seconds: AppConfig.defaultTokenExpiresIn));
       await _prefs?.setString('token_expiry', expiryTime.toIso8601String());
 
-      // 更新当前用户
-      _currentUser = tokenResponse.user;
-
-      // 缓存用户信息
-      await _prefs?.setString('current_user', jsonEncode(tokenResponse.user.toJson()));
+      // 步骤 2：获取用户信息（使用刚刚获取的 Token）
+      final user = await getCurrentUser();
 
       // 更新认证状态
       _authStatus = AuthStatus.authenticated;
@@ -223,7 +225,7 @@ class AuthService {
         _scheduleTokenRefresh(Duration(seconds: timeUntilRefresh));
       }
 
-      return _currentUser!;
+      return user;
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) {
         throw InvalidCredentialsException('用户名或密码错误');
@@ -324,7 +326,7 @@ class AuthService {
       _currentUser = user;
 
       // 更新缓存
-      // await _prefs?.setString('current_user', jsonEncode(user.toJson()));
+      await _prefs?.setString('current_user', jsonEncode(user.toJson()));
 
       return user;
     } catch (e) {
