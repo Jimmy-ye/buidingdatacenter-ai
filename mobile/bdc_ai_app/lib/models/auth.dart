@@ -42,7 +42,7 @@ class TokenResponse {
 
 /// 用户信息模型
 class UserInfo {
-  final int id;
+  final String id;
   final String username;
   final String? email;
   final bool isSuperuser;
@@ -58,7 +58,7 @@ class UserInfo {
 
   factory UserInfo.fromJson(Map<String, dynamic> json) {
     return UserInfo(
-      id: json['id'] as int,
+      id: json['id']?.toString() ?? '',
       username: json['username'] as String,
       email: json['email'] as String?,
       isSuperuser: json['is_superuser'] as bool? ?? false,
@@ -130,7 +130,7 @@ class UserInfo {
 
 /// 角色信息模型
 class RoleInfo {
-  final int id;
+  final String id;
   final String name;
   final String displayName;
   final int level;
@@ -146,7 +146,7 @@ class RoleInfo {
 
   factory RoleInfo.fromJson(Map<String, dynamic> json) {
     return RoleInfo(
-      id: json['id'] as int,
+      id: json['id']?.toString() ?? '',
       name: json['name'] as String,
       displayName: json['display_name'] as String,
       level: json['level'] as int,
