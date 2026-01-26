@@ -46,19 +46,16 @@ def show_401_test_page():
                 # 设置无效 token
                 auth_manager._token = "invalid_token_12345"
 
-                # 尝试调用 API（注意：base_url 已包含 /api/v1）
-                response = requests.get(
-                    f"{auth_manager.base_url}/projects/",
-                    headers={"Authorization": f"Bearer {auth_manager._token}"}
-                )
-
-                # 恢复原始 token
-                auth_manager._token = original_token
-
-                if response.status_code == 401:
-                    ui.notify('成功触发 401 错误，请观察是否自动跳转到登录页', type='info')
-                else:
+                # 使用 auth_manager 调用 API（会触发 401 处理）
+                try:
+                    response = auth_manager.get('/projects/')
                     ui.notify(f'意外状态码: {response.status_code}', type='negative')
+                except Exception as api_error:
+                    # AuthManager 会处理 401，但可能会抛出异常
+                    ui.notify(f'API 调用完成，请观察是否自动跳转到登录页', type='info')
+
+                # 恢复原始 token（如果需要重新测试）
+                # auth_manager._token = original_token
 
             except Exception as e:
                 ui.notify(f'测试失败: {str(e)}', type='negative')
@@ -73,19 +70,18 @@ def show_401_test_page():
         async def test_expired_token():
             """测试过期 Token"""
             try:
-                # 构造一个过期的 JWT token（expired signature）
-                expired_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MDk0NTkyMDAsInN1YiI6ImFkbWluIn0.signature"
+                # 保存原始 token
+                original_token = auth_manager.token
 
-                # 尝试调用 API（注意：base_url 已包含 /api/v1）
-                response = requests.get(
-                    f"{auth_manager.base_url}/projects/",
-                    headers={"Authorization": f"Bearer {expired_token}"}
-                )
+                # 设置过期 token
+                auth_manager._token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MDk0NTkyMDAsInN1YiI6ImFkbWluIn0.signature"
 
-                if response.status_code == 401:
-                    ui.notify('成功触发 401 错误，请观察是否自动跳转到登录页', type='info')
-                else:
+                # 使用 auth_manager 调用 API（会触发 401 处理）
+                try:
+                    response = auth_manager.get('/projects/')
                     ui.notify(f'意外状态码: {response.status_code}', type='negative')
+                except Exception as api_error:
+                    ui.notify(f'API 调用完成，请观察是否自动跳转到登录页', type='info')
 
             except Exception as e:
                 ui.notify(f'测试失败: {str(e)}', type='negative')
@@ -106,16 +102,12 @@ def show_401_test_page():
                 # 临时移除 token
                 auth_manager._token = None
 
-                # 尝试调用 API（会触发 401，注意：base_url 已包含 /api/v1）
+                # 使用 auth_manager 调用 API（会触发 401 处理）
                 try:
                     response = auth_manager.get('/projects/')
-                except Exception as e:
-                    ui.notify(f'API 调用异常（预期行为）: {str(e)}', type='info')
-
-                # 恢复原始 token
-                auth_manager._token = original_token
-
-                ui.notify('请观察是否自动跳转到登录页', type='info')
+                    ui.notify(f'意外：API 调用成功', type='negative')
+                except Exception as api_error:
+                    ui.notify(f'API 调用完成，请观察是否自动跳转到登录页', type='info')
 
             except Exception as e:
                 ui.notify(f'测试失败: {str(e)}', type='negative')
