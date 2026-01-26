@@ -323,21 +323,47 @@ def main_page() -> None:
 
             with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
                 project_select = ui.select({}, value=None, label="项目").props("dense outlined")
-                project_create_btn = ui.button("＋项目").props("dense outlined")
-                project_edit_btn = ui.button("编辑").props("dense outlined")
-                project_delete_btn = ui.button("删除").props("dense outlined")
+
+                # 根据权限控制项目按钮
+                auth_mgr = get_auth_manager()
+                project_create_btn = None
+                project_edit_btn = None
+                project_delete_btn = None
+
+                if auth_mgr.has_permission('projects:create'):
+                    project_create_btn = ui.button("＋项目").props("dense outlined")
+                if auth_mgr.has_permission('projects:update'):
+                    project_edit_btn = ui.button("编辑").props("dense outlined")
+                if auth_mgr.has_permission('projects:delete'):
+                    project_delete_btn = ui.button("删除").props("dense outlined")
 
             tree_search = ui.input(placeholder="搜索结构名称...").props("dense clearable").classes("q-mt-sm")
 
             with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
-                building_add_btn = ui.button("＋楼栋").props("dense outlined")
-                system_add_btn = ui.button("＋系统").props("dense outlined")
-                zone_add_btn = ui.button("＋区域").props("dense outlined")
-                device_add_btn = ui.button("＋设备").props("dense outlined")
+                # 根据权限控制结构创建按钮
+                building_add_btn = None
+                system_add_btn = None
+                zone_add_btn = None
+                device_add_btn = None
+
+                if auth_mgr.has_permission('structures:create'):
+                    building_add_btn = ui.button("＋楼栋").props("dense outlined")
+                if auth_mgr.has_permission('structures:create'):
+                    system_add_btn = ui.button("＋系统").props("dense outlined")
+                if auth_mgr.has_permission('structures:create'):
+                    zone_add_btn = ui.button("＋区域").props("dense outlined")
+                if auth_mgr.has_permission('structures:create'):
+                    device_add_btn = ui.button("＋设备").props("dense outlined")
 
             with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
-                node_edit_btn = ui.button("编辑楼栋", color="primary").props("dense outlined")
-                node_delete_btn = ui.button("删除楼栋", color="negative").props("dense outlined")
+                # 根据权限控制结构编辑/删除按钮
+                node_edit_btn = None
+                node_delete_btn = None
+
+                if auth_mgr.has_permission('structures:update'):
+                    node_edit_btn = ui.button("编辑楼栋", color="primary").props("dense outlined")
+                if auth_mgr.has_permission('structures:delete'):
+                    node_delete_btn = ui.button("删除楼栋", color="negative").props("dense outlined")
 
             tree_widget = ui.tree([]).props("node-key=id")
 
@@ -354,9 +380,13 @@ def main_page() -> None:
                 with ui.row().classes("items-center justify-between w-full"):
                     project_title = ui.label("未选择项目").classes("text-h6")
                     with ui.row().classes("items-center q-gutter-sm"):
-                        # 显示当前用户
-                        if get_auth_manager().user:
-                            ui.label(f"用户: {get_auth_manager().user.get('username', 'Unknown')}").classes("text-caption")
+                        # 显示当前用户和角色信息
+                        auth_mgr = get_auth_manager()
+                        if auth_mgr.user:
+                            username = auth_mgr.user.get('username', 'Unknown')
+                            roles = auth_mgr.get_roles()
+                            role_display = " | ".join(roles) if roles else "无角色"
+                            ui.label(f"用户: {username} | {role_display}").classes("text-caption")
 
                         ui.label(UI_VERSION).classes("text-caption text-grey")
                         refresh_button = ui.button(icon="refresh").props("flat round dense")
@@ -421,9 +451,17 @@ def main_page() -> None:
                         ).props('row-key="id" dense flat selection="multiple" show-selection').classes("w-full")
 
                         with ui.row().classes("q-mt-sm q-gutter-sm"):
-                            upload_asset_button = ui.button("上传图片资产")
-                            delete_asset_button = ui.button("删除选中资产", color="negative")
-                            batch_delete_button = ui.button("批量删除已选资产", color="negative").props("outline")
+                            # 根据权限控制资产按钮
+                            upload_asset_button = None
+                            delete_asset_button = None
+                            batch_delete_button = None
+
+                            if auth_mgr.has_permission('assets:upload'):
+                                upload_asset_button = ui.button("上传图片资产")
+                            if auth_mgr.has_permission('assets:delete'):
+                                delete_asset_button = ui.button("删除选中资产", color="negative")
+                            if auth_mgr.has_permission('assets:delete'):
+                                batch_delete_button = ui.button("批量删除已选资产", color="negative").props("outline")
 
                     # 右列：资产详情 + 图片预览 + OCR/LLM 结果（固定 60% 宽度，防止内容撑开）
                     with ui.column().style("flex: 0 0 48%; width: 48%; min-width: 0; overflow: hidden;"):
@@ -456,8 +494,14 @@ def main_page() -> None:
                             ui.label("OCR/LLM 识别结果").classes("text-subtitle2 q-mb-sm")
                             inference_status_label = ui.label("").classes("text-caption text-grey q-mb-xs")
                             with ui.row().classes("q-mb-sm q-gutter-sm"):
-                                run_ocr_button = ui.button("运行 OCR")
-                                run_llm_button = ui.button("生成现场问题报告")
+                                # 根据权限控制OCR/LLM按钮
+                                run_ocr_button = None
+                                run_llm_button = None
+
+                                if auth_mgr.has_permission('ocr:run'):
+                                    run_ocr_button = ui.button("运行 OCR")
+                                if auth_mgr.has_permission('llm:run'):
+                                    run_llm_button = ui.button("生成现场问题报告")
                             ocr_objects_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
                             ocr_text_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
                             llm_summary_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
@@ -543,8 +587,10 @@ def main_page() -> None:
         nonlocal selected_asset
         if not selected_asset:
             inference_status_label.text = ""
-            run_ocr_button.disabled = True
-            run_llm_button.disabled = True
+            if run_ocr_button:
+                run_ocr_button.disabled = True
+            if run_llm_button:
+                run_llm_button.disabled = True
             return
 
         status = str(selected_asset.get("status") or "").lower()
@@ -568,8 +614,10 @@ def main_page() -> None:
         inference_status_label.text = msg
 
         is_image = modality == "image"
-        run_ocr_button.disabled = not is_image
-        run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter"})
+        if run_ocr_button:
+            run_ocr_button.disabled = not is_image
+        if run_llm_button:
+            run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter"})
 
     def get_current_project() -> Optional[Dict[str, Any]]:
         if not project_select.value:
@@ -970,8 +1018,10 @@ def main_page() -> None:
         selected_asset = asset_state_ref.selected_asset
 
     # 绑定 OCR / LLM 控制台按钮事件（需在两个 handler 定义之后）
-    run_ocr_button.on_click(on_run_ocr_click)
-    run_llm_button.on_click(on_run_scene_llm_click)
+    if run_ocr_button:
+        run_ocr_button.on_click(on_run_ocr_click)
+    if run_llm_button:
+        run_llm_button.on_click(on_run_scene_llm_click)
 
     async def on_upload_asset_click() -> None:
         """上传资产点击事件（委托给 events.asset_events.on_upload_asset_click）。"""
@@ -1178,18 +1228,43 @@ def main_page() -> None:
             on_success=reload_tree,
         )
 
-    project_create_btn.on_click(on_create_project_click)
-    project_edit_btn.on_click(on_edit_project_click)
-    project_delete_btn.on_click(on_delete_project_click)
-    system_add_btn.on_click(on_create_system_click)
-    zone_add_btn.on_click(on_create_zone_click)
-    device_add_btn.on_click(on_create_device_click)
-    upload_asset_button.on_click(on_upload_asset_click)
-    delete_asset_button.on_click(on_delete_asset_click)
-    batch_delete_button.on_click(on_batch_delete_assets_click)
-    building_add_btn.on_click(on_create_building_click)
-    node_edit_btn.on_click(on_edit_node_click)
-    node_delete_btn.on_click(on_delete_node_click)
+    # 绑定按钮事件（需要检查按钮是否为 None，根据权限可能不显示）
+    if project_create_btn:
+        project_create_btn.on_click(on_create_project_click)
+    if project_edit_btn:
+        project_edit_btn.on_click(on_edit_project_click)
+    if project_delete_btn:
+        project_delete_btn.on_click(on_delete_project_click)
+    if building_add_btn:
+        building_add_btn.on_click(on_create_building_click)
+    if system_add_btn:
+        system_add_btn.on_click(on_create_system_click)
+    if zone_add_btn:
+        zone_add_btn.on_click(on_create_zone_click)
+    if device_add_btn:
+        device_add_btn.on_click(on_create_device_click)
+    if node_edit_btn:
+        node_edit_btn.on_click(on_edit_building_click)
+    if node_delete_btn:
+        node_delete_btn.on_click(on_delete_building_click)
+    if upload_asset_button:
+        upload_asset_button.on_click(on_upload_asset_click)
+    if delete_asset_button:
+        delete_asset_button.on_click(on_delete_asset_click)
+    if batch_delete_button:
+        batch_delete_button.on_click(on_batch_delete_assets_click)
+
+    # 初始时禁用依赖树节点类型的按钮，避免误操作
+    if system_add_btn:
+        system_add_btn.disable()
+    if zone_add_btn:
+        zone_add_btn.disable()
+    if device_add_btn:
+        device_add_btn.disable()
+    if node_edit_btn:
+        node_edit_btn.disable()
+    if node_delete_btn:
+        node_delete_btn.disable()
 
     async def on_preview_click() -> None:
         """在右侧详情卡片中预览图片，统一使用后端下载端点。
