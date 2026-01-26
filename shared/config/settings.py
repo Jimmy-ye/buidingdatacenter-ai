@@ -15,7 +15,14 @@ class Settings:
             "postgresql://admin:password@localhost:5432/bdc_ai",
         )
         self.minio_endpoint = os.getenv("BDC_MINIO_ENDPOINT", "localhost:9000")
-        self.local_storage_dir = os.getenv("BDC_LOCAL_STORAGE_DIR", "data/assets")
+
+        # 本地存储目录：将相对路径转换为绝对路径
+        local_storage = os.getenv("BDC_LOCAL_STORAGE_DIR", "data/assets")
+        if not os.path.isabs(local_storage):
+            # 获取项目根目录（shared/config/settings.py 的上三级）
+            project_root = Path(__file__).resolve().parent.parent.parent
+            local_storage = str(project_root / local_storage)
+        self.local_storage_dir = local_storage
 
         # JWT 配置
         self.jwt_secret_key = os.getenv(

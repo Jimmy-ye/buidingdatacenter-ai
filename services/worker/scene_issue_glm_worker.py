@@ -3,7 +3,7 @@ import time
 import base64
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from difflib import SequenceMatcher
 
 import requests
@@ -35,7 +35,7 @@ GLM_BASE_URL = os.getenv("GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/"
 VISION_MODEL = os.getenv("GLM_VISION_MODEL", "glm-4v")
 
 # Worker 轮询间隔 (秒)
-POLL_INTERVAL = int(os.getenv("BDC_SCENE_WORKER_POLL_INTERVAL", "60"))
+POLL_INTERVAL = int(os.getenv("BDC_SCENE_WORKER_POLL_INTERVAL", "600"))
 
 if not GLM_API_KEY:
     raise RuntimeError("GLM_API_KEY is not set in environment variables")
@@ -92,6 +92,9 @@ def get_image_content_from_detail(detail: Dict[str, Any]):
         print(f"[WARN] asset {detail.get('id')} has no file_path; cannot load image")
         return None
 
+    # 标准化路径：统一使用正斜杠，处理 Windows 反斜杠问题
+    file_path = file_path.replace("\\", "/").replace("//", "/")
+
     full_path = Path(LOCAL_STORAGE_DIR) / file_path
     if not full_path.is_file():
         print(f"[WARN] Local image file not found: {full_path}")
@@ -111,7 +114,7 @@ def get_image_content_from_detail(detail: Dict[str, Any]):
         return None
 
 
-def build_scene_prompt(note: str | None) -> str:
+def build_scene_prompt(note: Optional[str]) -> str:
     """构造发送给 GLM-4V 的中文 Prompt，要求输出 SceneIssueReportPayload JSON（场景问题）。"""
 
     base = """
@@ -156,7 +159,7 @@ def build_scene_prompt(note: str | None) -> str:
     return base
 
 
-def build_meter_prompt(note: str | None) -> str:
+def build_meter_prompt(note: Optional[str]) -> str:
     """构造发送给 GLM-4V 的 Prompt，专门用于仪表读数识别。"""
 
     base = """
@@ -195,7 +198,7 @@ def build_meter_prompt(note: str | None) -> str:
     return base
 
 
-def call_glm_vision(image_content: Dict[str, Any], text_prompt: str) -> Dict[str, Any] | None:
+def call_glm_vision(image_content: Dict[str, Any], text_prompt: str) -> Optional[Dict[str, Any]]:
     """调用 GLM-4V，期望返回符合 SceneIssueReportPayload 的 JSON 对象。"""
 
     try:
@@ -225,7 +228,7 @@ def call_glm_vision(image_content: Dict[str, Any], text_prompt: str) -> Dict[str
         return None
 
 
-def normalise_scene_payload(raw: Dict[str, Any], note: str | None = None) -> Dict[str, Any]:
+def normalise_scene_payload(raw: Dict[str, Any], note: Optional[str] = None) -> Dict[str, Any]:
     """将 GLM 返回结果规范化为 SceneIssueReportPayload 结构。
 
     如果 summary 与工程师备注高度相似，则降低置信度并提示人工复核。
