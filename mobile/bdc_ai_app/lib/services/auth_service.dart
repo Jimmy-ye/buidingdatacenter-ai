@@ -115,6 +115,25 @@ class AuthService {
               await _clearAuthData();
               _authStatusController.add(AuthStatus.tokenExpired);
             }
+          } else if (_isRefreshing) {
+            // 正在其他请求中刷新 Token，等待刷新完成
+            int waited = 0;
+            while (_isRefreshing && waited < 50) {
+              // 等待最多 5 秒
+              await Future.delayed(const Duration(milliseconds: 100));
+              waited++;
+            }
+
+            // 刷新成功，重试原请求
+            if (_currentAccessToken != null) {
+              error.requestOptions.headers['Authorization'] = 'Bearer $_currentAccessToken';
+              try {
+                final cloneReq = await _dio.fetch(error.requestOptions);
+                return handler.resolve(cloneReq);
+              } catch (e) {
+                // 重试失败，继续往下走
+              }
+            }
           } else {
             // 没有 refresh_token，直接登出
             await _clearAuthData();
@@ -134,8 +153,9 @@ class AuthService {
     final userJson = _prefs?.getString('current_user');
     if (userJson != null) {
       try {
-        // TODO: 反序列化用户信息
-        // _currentUser = UserInfo.fromJson(jsonDecode(userJson));
+        // 反序列化用户信息
+        final userData = jsonDecode(userJson);
+        _currentUser = UserInfo.fromJson(userData);
         _authStatus = AuthStatus.authenticated;
         _authStatusController.add(AuthStatus.authenticated);
 
@@ -190,7 +210,7 @@ class AuthService {
       _currentUser = tokenResponse.user;
 
       // 缓存用户信息
-      // await _prefs?.setString('current_user', jsonEncode(tokenResponse.user.toJson()));
+      await _prefs?.setString('current_user', jsonEncode(tokenResponse.user.toJson()));
 
       // 更新认证状态
       _authStatus = AuthStatus.authenticated;
