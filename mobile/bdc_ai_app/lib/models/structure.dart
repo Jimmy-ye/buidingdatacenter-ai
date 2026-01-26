@@ -431,3 +431,34 @@ class ZoneLocation {
     };
   }
 }
+
+/// 设备创建模型（用于添加设备）
+class DeviceCreate {
+  final String? zoneId;
+  final String? deviceType;
+  final String model; // 必填，作为设备名称
+  final double? ratedPower;
+  final String? serialNo;
+  final List<String>? tags;
+
+  DeviceCreate({
+    this.zoneId,
+    this.deviceType,
+    required this.model,
+    this.ratedPower,
+    this.serialNo,
+    this.tags,
+  });
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{
+      'model': model,
+    };
+    if (zoneId != null) json['zone_id'] = zoneId;
+    if (deviceType != null) json['device_type'] = deviceType;
+    if (ratedPower != null) json['rated_power'] = ratedPower;
+    if (serialNo != null) json['serial_no'] = serialNo;
+    if (tags != null && tags!.isNotEmpty) json['tags'] = tags;
+    return json;
+  }
+}

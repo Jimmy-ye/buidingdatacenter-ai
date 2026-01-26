@@ -40,4 +40,7 @@ class ApiEndpoints {
 
   /// 健康检查
   static const String health = '/api/v1/health/';
+
+  /// 创建设备
+  static String createDevice(String systemId) => '/api/v1/systems/$systemId/devices';
 }

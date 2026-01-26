@@ -150,10 +150,24 @@ class RoleInfo {
       name: json['name'] as String,
       displayName: json['display_name'] as String,
       level: json['level'] as int,
-      permissions: (json['permissions'] as List<dynamic>?)
-              ?.map((p) => p as String)
-              .toList() ??
-          [],
+      permissions: (() {
+        final raw = json['permissions'];
+        if (raw is List) {
+          final List<String> result = [];
+          for (final p in raw) {
+            if (p is String) {
+              result.add(p);
+            } else if (p is Map<String, dynamic>) {
+              final code = p['code'];
+              if (code is String) {
+                result.add(code);
+              }
+            }
+          }
+          return result;
+        }
+        return <String>[];
+      })(),
     );
   }
 

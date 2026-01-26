@@ -101,6 +101,12 @@ class StructureProvider extends ChangeNotifier {
     return _expandedSystems.contains(systemId);
   }
 
+  void expandSystem(String systemId) {
+    _expandedSystems.add(systemId);
+    debugPrint('展开系统: $systemId');
+    notifyListeners();
+  }
+
   /// 展开所有节点
   void expandAll() {
     for (var building in _buildings) {
@@ -136,6 +142,41 @@ class StructureProvider extends ChangeNotifier {
   /// 清除错误消息
   void _clearError() {
     _errorMessage = null;
+  }
+
+  /// 创建设备
+  ///
+  /// 参数:
+  /// - [systemId] 系统 UUID
+  /// - [device] 设备创建请求
+  /// - [projectId] 项目 UUID（用于刷新树）
+  ///
+  /// 返回创建的设备
+  Future<Device> createDevice(
+    String systemId,
+    DeviceCreate device,
+    String projectId,
+  ) async {
+    _setLoading(true);
+    _clearError();
+
+    try {
+      final newDevice = await _service.createDevice(systemId, device);
+      debugPrint('成功创建设备: ${newDevice.name}');
+
+      // 刷新工程结构树
+      await refreshStructureTree(projectId);
+
+      expandSystem(systemId);
+
+      return newDevice;
+    } catch (e) {
+      _setError('创建设备失败: $e');
+      debugPrint('错误: $e');
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
   }
 
   @override

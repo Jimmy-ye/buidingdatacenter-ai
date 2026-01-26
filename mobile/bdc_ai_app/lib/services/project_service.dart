@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
+import 'auth_service.dart';
 import '../models/project.dart';
 import '../models/structure.dart';
 import '../config/constants.dart';
@@ -12,6 +13,15 @@ class ProjectService {
   final ApiService _api;
 
   ProjectService({ApiService? api}) : _api = api ?? ApiService();
+
+  /// 为需要认证的请求构建带 Authorization 头的请求头
+  Map<String, String> _buildAuthHeaders() {
+    final token = AuthService().currentToken;
+    if (token != null && token.isNotEmpty) {
+      return {'Authorization': 'Bearer $token'};
+    }
+    return <String, String>{};
+  }
 
   /// 获取项目列表
   ///
@@ -55,7 +65,10 @@ class ProjectService {
         : '${ApiEndpoints.projects}?$queryString';
 
     try {
-      final response = await _api.get(endpoint);
+      final response = await _api.get(
+        endpoint,
+        headers: _buildAuthHeaders(),
+      );
       final List<dynamic> data = jsonDecode(response.body);
       return data.map((json) => Project.fromJson(json)).toList();
     } catch (e) {
@@ -74,7 +87,10 @@ class ProjectService {
   /// 返回项目详情
   Future<Project> getProjectDetail(String id) async {
     try {
-      final response = await _api.get(ApiEndpoints.projectDetail(id));
+      final response = await _api.get(
+        ApiEndpoints.projectDetail(id),
+        headers: _buildAuthHeaders(),
+      );
       final data = jsonDecode(response.body);
       return Project.fromJson(data);
     } catch (e) {
@@ -111,7 +127,10 @@ class ProjectService {
   /// 返回完整工程结构树（楼栋 → 系统 → 设备 + 区域）
   Future<List<Building>> getStructureTree(String projectId) async {
     try {
-      final response = await _api.get(ApiEndpoints.structureTree(projectId));
+      final response = await _api.get(
+        ApiEndpoints.structureTree(projectId),
+        headers: _buildAuthHeaders(),
+      );
       final Map<String, dynamic> data = jsonDecode(response.body);
 
       // 从 tree.children 中提取 Building 列表 ⭐
@@ -129,6 +148,30 @@ class ProjectService {
           .toList();
     } catch (e) {
       debugPrint('获取工程结构树失败: $e');
+      rethrow;
+    }
+  }
+
+  /// 创建设备
+  ///
+  /// API: POST /api/v1/systems/{system_id}/devices
+  ///
+  /// 参数:
+  /// - [systemId] 系统 UUID
+  /// - [device] 设备创建请求
+  ///
+  /// 返回创建的设备信息
+  Future<Device> createDevice(String systemId, DeviceCreate device) async {
+    try {
+      final response = await _api.post(
+        ApiEndpoints.createDevice(systemId),
+        headers: _buildAuthHeaders(),
+        body: device.toJson(),
+      );
+      final data = jsonDecode(response.body);
+      return Device.fromJson(data);
+    } catch (e) {
+      debugPrint('创建设备失败: $e');
       rethrow;
     }
   }

@@ -130,7 +130,11 @@ class BdcAiApp extends StatelessWidget {
 
             case '/assets':
               // 资产页（需要认证）
+              // 需要将 settings 透传给 MaterialPageRoute，
+              // 以便 AssetsPage 通过 ModalRoute.of(context)?.settings.arguments
+              // 获取 viewType/targetId 等路由参数
               return MaterialPageRoute(
+                settings: settings,
                 builder: (context) {
                   return Consumer<AuthProvider>(
                     builder: (context, auth, child) {

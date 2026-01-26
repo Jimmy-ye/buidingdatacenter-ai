@@ -7,6 +7,7 @@ import '../models/asset.dart';
 import '../providers/asset_provider.dart';
 import '../providers/app_provider.dart';
 import '../services/asset_service.dart';
+import '../services/auth_service.dart';
 
 /// 资产快捷视图页
 ///
@@ -449,6 +450,17 @@ class _AssetsPageState extends State<AssetsPage> {
 
   /// 进入选择模式⭐
   void _enterSelectionMode() {
+    // ⭐ 检查权限
+    if (!_canDeleteAssets) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('权限不足：需要 assets:delete 权限'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _selectionMode = true;
       _selectedAssetIds.clear();
@@ -477,6 +489,18 @@ class _AssetsPageState extends State<AssetsPage> {
   /// 删除选中的资产⭐
   Future<void> _deleteSelectedAssets() async {
     if (_selectedAssetIds.isEmpty) return;
+
+    // ⭐ 检查权限
+    if (!_canDeleteAssets) {
+      _exitSelectionMode();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('权限不足：需要 assets:delete 权限'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     // 确认对话框
     final confirmed = await showDialog<bool>(
@@ -725,6 +749,12 @@ class _AssetsPageState extends State<AssetsPage> {
   bool _selectionMode = false; // ⭐ 选择模式
   final Set<String> _selectedAssetIds = {}; // ⭐ 已选择的资产ID
 
+  /// ⭐ 权限检查：是否有删除资产权限
+  bool get _canDeleteAssets {
+    final authService = AuthService();
+    return authService.hasPermission('assets:delete');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -774,11 +804,13 @@ class _AssetsPageState extends State<AssetsPage> {
             ),
           ] else ...[
             // 正常模式下的操作按钮
-            IconButton(
-              icon: const Icon(Icons.check_circle_outline),
-              onPressed: _enterSelectionMode,
-              tooltip: '批量管理',
-            ),
+            // ⭐ 只对有权限用户显示"选择删除"按钮
+            if (_canDeleteAssets)
+              IconButton(
+                icon: const Icon(Icons.check_circle_outline),
+                onPressed: _enterSelectionMode,
+                tooltip: '批量管理',
+              ),
             // 拍照上传按钮
             IconButton(
               icon: const Icon(Icons.camera_alt),
