@@ -2,8 +2,9 @@
 后端 API 客户端封装
 提供统一的后端调用接口，便于测试和维护
 
-版本: v1.0
+版本: v1.1
 创建时间: 2025-01-22
+更新时间: 2025-01-25 - 添加认证支持
 """
 
 import httpx
@@ -26,16 +27,21 @@ class BackendClient:
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8000/api/v1",
+        base_url: str = None,  # 改为可选，使用 Config
         timeout: float = 30.0
     ):
         """
         初始化客户端
 
         Args:
-            base_url: 后端 API 基础 URL
+            base_url: 后端 API 基础 URL（可选，默认使用 Config）
             timeout: 请求超时时间（秒）
         """
+        from desktop.nicegui_app.config import Config
+
+        if base_url is None:
+            base_url = Config.get_api_base_url()
+
         self.base_url = base_url
         self.timeout = timeout
 
@@ -61,9 +67,24 @@ class BackendClient:
         """
         url = f"{self.base_url}{path}"
 
+        # 添加认证头
+        headers = kwargs.pop('headers', {})
+        from desktop.nicegui_app.auth_manager import auth_manager
+
+        if auth_manager.is_authenticated():
+            headers['Authorization'] = f'Bearer {auth_manager.token}'
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.request(method, url, **kwargs)
+                resp = await client.request(method, url, headers=headers, **kwargs)
+
+                # 处理 401 错误
+                if resp.status_code == 401 and auth_manager.is_authenticated():
+                    auth_manager.logout()
+                    # 注意：这里无法直接调用 ui.navigate，因为是在异步上下文中
+                    # 401 处理主要依赖 auth_manager 的自动处理
+                    logger.warning("收到 401 响应，已自动登出")
+
                 resp.raise_for_status()
                 return resp.json()
 

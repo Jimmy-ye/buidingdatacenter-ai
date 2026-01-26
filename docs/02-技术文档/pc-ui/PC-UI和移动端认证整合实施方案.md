@@ -1,20 +1,118 @@
 # BDC-AI PC-UI 和移动端认证系统整合实施方案
 
 生成时间：2026-01-25
-版本：v1.0
+版本：v2.0（安全增强版）
 
 ---
 
 ## 📋 目录
 
-1. [项目概述](#项目概述)
-2. [技术架构](#技术架构)
-3. [实施计划](#实施计划)
-4. [移动端整合](#移动端整合)
-5. [PC-UI 整合](#pc-ui-整合)
-6. [测试与验证](#测试与验证)
-7. [部署上线](#部署上线)
-8. [时间估算](#时间估算)
+1. [安全风险评估](#安全风险评估)
+2. [项目概述](#项目概述)
+3. [技术架构](#技术架构)
+4. [实施计划](#实施计划)
+5. [安全实施指南](#安全实施指南)
+6. [移动端整合](#移动端整合)
+7. [PC-UI 整合](#pc-ui-整合)
+8. [测试与验证](#测试与验证)
+9. [部署上线](#部署上线)
+10. [最佳实践](#最佳实践)
+
+---
+
+## ⚠️ 安全风险评估
+
+### 🔴 高风险问题
+
+#### 1. PC 登录页默认 admin 账号
+
+**问题描述**：
+```python
+username.value = username.value or 'admin'
+password.value = password.value or 'admin123'
+```
+
+**风险等级**：🔴 高危
+
+**风险说明**：
+- 输入为空时自动使用 admin/admin123 登录
+- 生产环境部署时如果忘记移除，将成为公开后门
+- 任何人空凭据即可登录系统
+
+**解决方案**：
+- ✅ **必须**在开发环境保留（仅开发便利）
+- ✅ **必须**在生产环境完全移除
+- ✅ 使用环境变量控制：`ALLOW_DEFAULT_LOGIN`
+- ✅ 在代码中添加环境检查：
+  ```python
+  if os.getenv('ENVIRONMENT') == 'production':
+      # 生产环境：不允许默认登录
+      pass
+  else:
+      # 开发环境：允许默认登录
+      username.value = username.value or 'admin'
+      password.value = password.value or 'admin123'
+  ```
+
+#### 2. Base URL 硬编码
+
+**问题描述**：
+```dart
+// mobile/lib/main.dart
+authService = AuthService(baseUrl: 'http://localhost:8000');
+
+// pc_ui/auth/auth_manager.py
+auth_manager = AuthManager(base_url="http://localhost:8000")
+```
+
+**风险等级**：🟡 中等
+
+**风险说明**：
+- HTTP 传输未加密，存在窃听风险
+- 硬编码 URL 导致无法灵活切换环境
+- 修改环境需要重新打包/部署
+
+**解决方案**：
+- ✅ 使用环境变量配置 API 地址
+- ✅ 生产环境强制使用 HTTPS
+- ✅ 支持多环境配置（开发/测试/生产）
+- ✅ 移动端使用 Flutter Flavor 或环境配置
+
+#### 3. PC 端无 refresh_token / 401 处理
+
+**问题描述**：
+- `AuthManager` 只保存 `access_token`，没有 `refresh_token`
+- 没有统一处理 401 错误
+
+**风险等级**：🟡 中等
+
+**风险说明**：
+- Token 过期后所有请求直接 401
+- 用户体验差："假死"状态
+- 需要手动重新登录
+
+**解决方案**：
+- ✅ 阶段 2：添加基础 401 处理（自动登出）
+- ✅ 阶段 4：视需要添加 refresh_token 支持
+
+### 🟡 中风险问题
+
+#### 4. 客户端权限逻辑缺失
+
+**问题描述**：
+- 前端只做"是否登录"检查
+- 没有根据 role/permission 控制菜单和按钮
+
+**风险等级**：🟢 低（不影响后端安全）
+
+**风险说明**：
+- 用户能看到但无权限的功能
+- 点击后显示 403 错误
+- 用户体验差
+
+**解决方案**：
+- ✅ 阶段 4：根据角色隐藏菜单（UX 优化）
+- ✅ 后端继续执行严格的权限检查
 
 ---
 
@@ -24,18 +122,19 @@
 
 将 BDC-AI 的账号权限系统整合到现有的移动端（Flutter）和 PC-UI（NiceGUI）中，实现：
 - ✅ 统一的认证机制
-- ✅ 自动 Token 管理
-- ✅ 权限控制
+- ✅ 安全的 Token 管理
+- ✅ 完善的权限控制
 - ✅ 良好的用户体验
+- ✅ 生产级安全标准
 
 ### 当前状态
 
 | 组件 | 状态 | 说明 |
 |-----|------|------|
-| 后端认证 API | ✅ 完成 | 所有接口已实现并通过测试 |
+| 后端认证 API | ✅ 完成 | 所有接口已实现并通过测试（100%） |
+| 后端权限检查 | ✅ 完成 | 业务 API 已添加认证依赖 |
 | 移动端框架 | ⏸ 存在 | 需要添加认证逻辑 |
 | PC-UI 框架 | ⏸ 存在 | 需要添加认证逻辑 |
-| 认证中间件 | ❌ 缺失 | 需要开发 |
 
 ---
 
@@ -52,11 +151,13 @@
 │              │  ┌────────────┬────────────┐        │
 │  - 登录页面  │  │  登录页面   │  主界面    │        │
 │  - Token管理 │  │  Token管理  │  权限控制  │        │
-│  - 自动刷新  │  │  自动刷新   │  会话管理  │        │
-└──────┬───────┴──────────────┴────────────┘        │
-       │                                              │
-       │ HTTP/HTTPS                                   │
-       ▼                                              │
+│  - 自动刷新  │  │  会话管理   │  401处理   │        │
+│  - 权限控制  │  └────────────┴────────────┘        │
+└──────┬───────┴──────────────────────────────────────┘
+       │
+       │ HTTPS (生产环境)
+       │ HTTP (开发环境)
+       ▼
 ┌─────────────────────────────────────────────────────┤
 │              后端 API 层 (FastAPI)                  │
 │                                                     │
@@ -71,60 +172,346 @@
 │                                                     │
 │  ┌──────────────────────────────────────────┐     │
 │  │  业务端点 (/api/v1/)                     │     │
-│  │  - /projects/                            │     │
-│  │  - /buildings/                           │     │
-│  │  - /assets/                              │     │
-│  │  - ...                                   │     │
+│  │  - /projects/ (已添加认证)              │     │
+│  │  - /buildings/ (待添加认证)             │     │
+│  │  - /assets/ (待添加认证)                │     │
 │  └──────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────┘
-```
-
-### 认证流程
-
-```
-1. 用户登录
-   ┌─> 输入用户名密码
-   │
-   ├─> 调用 POST /api/v1/auth/login
-   │
-   ├─> 接收 access_token 和 refresh_token
-   │
-   └─> 安全存储 Token（移动端：flutter_secure_storage）
-                     （PC-UI：app.storage.user）
-
-2. 访问 API
-   ┌─> 从存储读取 Token
-   │
-   ├─> 添加到请求头 Authorization: Bearer {token}
-   │
-   ├─> 调用业务 API
-   │
-   ├─> 如果 401：
-   │   ├─> 尝试用 refresh_token 刷新
-   │   ├─> 如果刷新成功，重试原请求
-   │   └─> 如果刷新失败，跳转登录页
-   │
-   └─> 返回数据
-
-3. 用户登出
-   ┌─> 清除本地 Token
-   │
-   └─> 跳转登录页
 ```
 
 ---
 
 ## 实施计划
 
-### 阶段划分
+### 阶段划分（更新版）
 
-| 阶段 | 内容 | 预计时间 | 优先级 |
-|-----|------|---------|--------|
-| **阶段 1** | 移动端认证整合 | 4 小时 | 🔴 高 |
-| **阶段 2** | PC-UI 认证整合 | 3 小时 | 🔴 高 |
-| **阶段 3** | 联调测试 | 2 小时 | 🟡 中 |
-| **阶段 4** | 文档编写 | 1 小时 | 🟢 低 |
-| **总计** | | **10 小时** | |
+| 阶段 | 内容 | 预计时间 | 优先级 | 安全要求 |
+|-----|------|---------|--------|---------|
+| **阶段 1** | 移动端认证整合 | 4 小时 | 🔴 高 | 强制 HTTPS |
+| **阶段 2** | PC-UI 认证整合 | 3 小时 | 🔴 高 | 移除默认账号 |
+| **阶段 3** | 联调 & 安全校验 | 2 小时 | 🔴 高 | 权限验证 |
+| **阶段 4** | 优化完善 | 2 小时 | 🟡 中 | Token 刷新 |
+| **总计** | | **11 小时** | | |
+
+### 实施顺序建议
+
+**阶段 1：移动端认证（优先）**
+- ✅ 完整的 Token 管理（access + refresh）
+- ✅ 自动刷新机制
+- ✅ 401 统一处理
+- ✅ 配置化 API 地址
+
+**阶段 2：PC-UI 基础认证**
+- ✅ 移除 admin 默认账号（关键！）
+- ✅ 添加 401 自动登出
+- ✅ 会话持久化
+- ⏸ 暂不做 refresh_token
+
+**阶段 3：联调 & 安全校验**
+- ✅ 新账号登录测试
+- ✅ 权限不足测试（403）
+- ✅ 401 自动登出测试
+
+**阶段 4：优化完善（可选）**
+- ⏸ PC 端 refresh_token（如需要）
+- ⏸ 前端权限控制（菜单级别）
+- ⏸ 并发刷新互斥锁
+
+---
+
+## 安全实施指南
+
+### 移动端安全配置
+
+#### 1. 环境配置
+
+**文件**：`mobile/lib/config.dart`
+
+```dart
+class Config {
+  /// API 基础地址（从环境变量或配置读取）
+  static String get apiBaseUrl {
+    // 从环境变量读取
+    const baseUrl = String.fromEnvironment('API_BASE_URL');
+
+    if (baseUrl.isNotEmpty) {
+      return baseUrl;
+    }
+
+    // 根据编译配置选择
+    if (const bool.fromEnvironment('PRODUCTION', defaultValue: false)) {
+      // 生产环境：必须使用 HTTPS
+      return 'https://api.example.com';
+    } else if (const bool.fromEnvironment('DEVELOPMENT', defaultValue: true)) {
+      // 开发环境
+      return 'http://localhost:8000';
+    } else {
+      // 测试环境
+      return 'https://test-api.example.com';
+    }
+  }
+
+  /// 是否生产环境
+  static const bool isProduction = bool.fromEnvironment('PRODUCTION', defaultValue: false);
+
+  /// 是否启用调试模式
+  static const bool enableDebug = !isProduction;
+}
+```
+
+**使用方式**：
+```dart
+// main.dart
+authService = AuthService(baseUrl: Config.apiBaseUrl);
+```
+
+#### 2. AuthService 安全改进
+
+**添加刷新互斥锁**：
+```dart
+class AuthService {
+  ...
+  bool _isRefreshing = false;
+
+  /// 刷新 Token（带互斥锁）
+  Future<bool> _refreshAccessToken() async {
+    // 防止并发刷新
+    if (_isRefreshing) {
+      return false;
+    }
+
+    _isRefreshing = true;
+
+    try {
+      if (_refreshToken == null) return false;
+
+      final response = await _dio.post(
+        '/api/v1/auth/refresh',
+        data: {'refresh_token': _refreshToken},
+      );
+
+      final data = response.data;
+      _accessToken = data['access_token'];
+      _refreshToken = data['refresh_token'];
+
+      await _storage.write(key: _tokenKey, value: _accessToken);
+      await _storage.write(key: _refreshTokenKey, value: _refreshToken);
+
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+}
+```
+
+### PC-UI 安全配置
+
+#### 1. 环境配置
+
+**文件**：`pc_ui/config.py`
+
+```python
+import os
+from pathlib import Path
+
+class Config:
+    """配置管理"""
+
+    @staticmethod
+    def get_api_base_url():
+        """获取 API 基础地址"""
+        # 从环境变量读取
+        api_url = os.getenv('BDC_API_URL')
+        if api_url:
+            return api_url
+
+        # 根据环境变量判断
+        environment = os.getenv('ENVIRONMENT', 'development')
+
+        if environment == 'production':
+            # 生产环境：必须使用 HTTPS
+            return 'https://api.example.com'
+        elif environment == 'testing':
+            return 'https://test-api.example.com'
+        else:
+            # 开发环境
+            return 'http://localhost:8000'
+
+    @staticmethod
+    def is_production():
+        """是否生产环境"""
+        return os.getenv('ENVIRONMENT', 'development') == 'production'
+
+    @staticmethod
+    def allow_default_login():
+        """是否允许默认登录（仅开发环境）"""
+        return not Config.is_production()
+```
+
+#### 2. AuthManager 安全改进
+
+**添加 401 处理**：
+
+```python
+class AuthManager:
+    """认证管理器（安全增强版）"""
+
+    def __init__(self, base_url: str = None):
+        if base_url is None:
+            base_url = Config.get_api_base_url()
+
+        self.base_url = base_url
+        self.session = requests.Session()
+        self.token: Optional[str] = None
+        self.refresh_token: Optional[str] = None
+        self.user: Optional[dict] = None
+
+        # 尝试从存储恢复会话
+        self._restore_session()
+
+    def _save_session(self):
+        """保存会话到存储"""
+        app.storage.user['token'] = self.token
+        app.storage.user['refresh_token'] = self.refresh_token
+        app.storage.user['user'] = self.user
+
+    def _clear_session(self):
+        """清除会话"""
+        self.token = None
+        self.refresh_token = None
+        self.user = None
+        if 'user' in app.storage.user:
+            del app.storage.user['token']
+            del app.storage.user['refresh_token']
+            del app.storage.user['user']
+
+    def _handle_401(self, response: requests.Response) -> bool:
+        """处理 401 错误"""
+        if response.status_code == 401:
+            # Token 过期，自动登出
+            self.logout()
+
+            # 显示提示
+            ui.notify('登录已过期，请重新登录', type='warning')
+
+            # 跳转到登录页
+            ui.navigate('/login')
+
+            return True
+        return False
+
+    def get(self, endpoint: str, **kwargs) -> requests.Response:
+        """GET 请求（带 401 处理）"""
+        response = self.session.get(f"{self.base_url}{endpoint}", **kwargs)
+
+        # 检查 401
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
+
+    def post(self, endpoint: str, **kwargs) -> requests.Response:
+        """POST 请求（带 401 处理）"""
+        response = self.session.post(f"{self.base_url}{endpoint}", **kwargs)
+
+        # 检查 401
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
+
+    # 同样处理 put 和 delete
+    def put(self, endpoint: str, **kwargs) -> requests.Response:
+        """PUT 请求"""
+        response = self.session.put(f"{self.base_url}{endpoint}", **kwargs)
+
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
+
+    def delete(self, endpoint: str, **kwargs) -> requests.Response:
+        """DELETE 请求"""
+        response = self.session.delete(f"{self.base_url}{endpoint}", **kwargs)
+
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
+```
+
+#### 3. 登录页面安全改进
+
+**文件**：`pc_ui/pages/login.py`
+
+```python
+"""
+登录页面（安全增强版）
+"""
+from nicegui import ui, app
+from ..auth.auth_manager import auth_manager
+from ..config import Config
+
+
+def show_login_page():
+    """显示登录页面"""
+
+    # 清空页面
+    ui.query('body').classes('bg-gray-100')
+
+    with ui.column().classes('w-full h-full items-center justify-center'):
+        # Logo 和标题
+        with ui.card().classes('w-96 p-8'):
+            ui.label('BDC-AI').classes('text-4xl font-bold text-center mb-2')
+            ui.label('建筑节能管理平台').classes('text-center text-gray-600 mb-8')
+
+            # 登录表单
+            username = ui.input(
+                '用户名',
+                placeholder='请输入用户名',
+                validation=lambda x: True if x else '请输入用户名'
+            ).props('outlined').classes('w-full mb-4')
+
+            password = ui.input(
+                '密码',
+                placeholder='请输入密码',
+                password=True,
+                validation=lambda x: True if x else '请输入密码'
+            ).props('outlined').classes('w-full mb-4')
+
+            message = ui.label('').classes('text-red-600 mb-4')
+
+            async def do_login():
+                """执行登录"""
+                message.text = ''
+
+                # ✅ 安全改进：移除默认账号，生产环境禁止
+                if not username.value or not password.value:
+                    message.text = '请输入用户名和密码'
+                    return
+
+                # 开发环境可选：显示提示
+                if not Config.is_production():
+                    # 仅开发环境显示默认账号提示
+                    if not username.value:
+                        message.text = '提示：开发环境可使用 admin/admin123'
+
+                success, msg = auth_manager.login(username.value, password.value)
+
+                if success:
+                    ui.notify('登录成功', type='positive')
+                    # 导航到主页面
+                    app.storage.user['redirect_to_home'] = True
+                    ui.navigate('/')
+                else:
+                    message.text = msg
+                    ui.notify(msg, type='negative')
+
+            ui.button('登录', on_click=do_login).props('push').classes('w-full')
+```
 
 ---
 
@@ -133,7 +520,7 @@
 ### 技术栈
 
 - **框架**：Flutter
-- **状态管理**：Provider / Riverpod
+- **状态管理**：Provider
 - **HTTP 客户端**：Dio
 - **安全存储**：flutter_secure_storage
 - **本地缓存**：shared_preferences
@@ -146,12 +533,12 @@
 # mobile/pubspec.yaml
 
 dependencies:
-  # 现有依赖...
   dio: ^5.3.0
   flutter_secure_storage: ^8.0.0
   shared_preferences: ^2.2.0
   provider: ^6.0.0
   json_annotation: ^4.8.0
+  envied: ^0.5.0  # 新增：环境变量支持
 
 dev_dependencies:
   json_serializable: ^6.7.0
@@ -164,7 +551,34 @@ cd mobile
 flutter pub get
 ```
 
-#### 步骤 2：创建数据模型（30 分钟）
+#### 步骤 2：创建配置文件（新增，15 分钟）
+
+**文件**：`mobile/lib/config.dart`
+
+```dart
+import 'package:envied/envied.dart';
+import 'package:flutter/foundation.dart';
+
+part 'config.g.dart';
+
+@Envied(path: 'API_BASE_URL', defaultValue: 'http://localhost:8000')
+class Config {
+  static const String apiBaseUrl = _apiBaseUrl;
+
+  @Envied(path: 'PRODUCTION', defaultValue: false)
+  static const bool isProduction = _isProduction;
+
+  @Envied(path: 'ENABLE_DEBUG', defaultValue: true)
+  static const bool enableDebug = _enableDebug;
+}
+```
+
+生成代码：
+```bash
+flutter pub run build_runner build --delete-conflicting-outputs
+```
+
+#### 步骤 3：创建数据模型（30 分钟）
 
 **文件**：`mobile/lib/models/auth.dart`
 
@@ -212,6 +626,8 @@ class User {
   final String id;
   final String username;
   final String email;
+  final String? role_name;  // 新增：角色名称
+  final List<String>? permissions;  // 新增：权限列表
   final bool is_active;
   final bool is_superuser;
 
@@ -219,6 +635,8 @@ class User {
     required this.id,
     required this.username,
     required this.email,
+    this.role_name,
+    this.permissions,
     required this.is_active,
     required this.is_superuser,
   });
@@ -246,18 +664,20 @@ class ApiError {
 
 生成代码：
 ```bash
-flutter pub run build_runner build
+flutter pub run build_runner build --delete-conflicting-outputs
 ```
 
-#### 步骤 3：创建认证服务（1 小时）
+#### 步骤 4：创建认证服务（1 小时，安全增强）
 
 **文件**：`mobile/lib/services/auth_service.dart`
 
 ```dart
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/auth.dart';
+import '../config.dart';  // 新增
 
 class AuthService {
   final Dio _dio;
@@ -269,6 +689,7 @@ class AuthService {
   String? _accessToken;
   String? _refreshToken;
   User? _currentUser;
+  bool _isRefreshing = false;  // 新增：刷新互斥锁
 
   AuthService({required String baseUrl})
       : _dio = Dio(
@@ -348,11 +769,18 @@ class AuthService {
     }
   }
 
-  /// 刷新 Token
+  /// 刷新 Token（带互斥锁）
   Future<bool> _refreshAccessToken() async {
-    try {
-      if (_refreshToken == null) return false;
+    // ⚠️ 安全改进：防止并发刷新
+    if (_isRefreshing) {
+      return false;
+    }
 
+    if (_refreshToken == null) return false;
+
+    _isRefreshing = true;
+
+    try {
       final response = await _dio.post(
         '/api/v1/auth/refresh',
         data: {'refresh_token': _refreshToken},
@@ -368,6 +796,8 @@ class AuthService {
       return true;
     } catch (e) {
       return false;
+    } finally {
+      _isRefreshing = false;
     }
   }
 
@@ -424,13 +854,22 @@ class AuthService {
 
   /// 获取 Dio 实例用于 API 调用
   Dio get apiClient => _dio;
+
+  /// 检查用户权限
+  bool hasPermission(String permission) {
+    if (_currentUser?.is_superuser ?? false) {
+      return true;  // 超级管理员拥有所有权限
+    }
+
+    return _currentUser?.permissions?.contains(permission) ?? false;
+  }
 }
 
 // 全局单例
 late AuthService authService;
 ```
 
-#### 步骤 4：创建 Provider（30 分钟）
+#### 步骤 5：创建 Provider（30 分钟）
 
 **文件**：`mobile/lib/providers/auth_provider.dart`
 
@@ -504,194 +943,40 @@ class AuthProvider with ChangeNotifier {
 
   /// 错误消息
   String? get errorMessage => _errorMessage;
-}
-```
 
-#### 步骤 5：创建登录页面（1 小时）
-
-**文件**：`mobile/lib/screens/login_screen.dart`
-
-```dart
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
-
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _obscurePassword = true;
-
-  @override
-  void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _handleLogin() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    final authProvider = context.read<AuthProvider>();
-
-    final success = await authProvider.login(
-      _usernameController.text,
-      _passwordController.text,
-    );
-
-    if (success && mounted) {
-      // 登录成功，导航到主页面
-      Navigator.pushReplacementNamed(context, '/home');
-    } else if (mounted) {
-      // 显示错误
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(authProvider.errorMessage ?? '登录失败'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Consumer<AuthProvider>(
-          builder: (context, authProvider, child) {
-            if (authProvider.isLoading) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            return Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Logo 和标题
-                    const Icon(
-                      Icons.energy_savings_leaf,
-                      size: 80,
-                      color: Colors.green,
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'BDC-AI',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const Text(
-                      '建筑节能管理平台',
-                      style: TextStyle(fontSize: 16, color: Colors.grey),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 48),
-
-                    // 用户名输入框
-                    TextFormField(
-                      controller: _usernameController,
-                      decoration: const InputDecoration(
-                        labelText: '用户名',
-                        prefixIcon: Icon(Icons.person),
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return '请输入用户名';
-                        }
-                        return null;
-                      },
-                      autofillHints: const [AutofillHints.username],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 密码输入框
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: '密码',
-                        prefixIcon: const Icon(Icons.lock),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscurePassword
-                              ? Icons.visibility_off
-                              : Icons.visibility),
-                          onPressed: () {
-                            setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            });
-                          },
-                        ),
-                        border: const OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return '请输入密码';
-                        }
-                        return null;
-                      },
-                      autofillHints: const [AutofillHints.password],
-                    ),
-                    const SizedBox(height: 24),
-
-                    // 登录按钮
-                    ElevatedButton(
-                      onPressed: _handleLogin,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text(
-                        '登录',
-                        style: TextStyle(fontSize: 18),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
+  /// 检查权限
+  bool hasPermission(String permission) {
+    return _authService.hasPermission(permission);
   }
 }
 ```
 
-#### 步骤 6：更新主应用（30 分钟）
+#### 步骤 6：创建登录页面（1 小时）
+
+**文件**：`mobile/lib/screens/login_screen.dart`（保持不变，参考原方案）
+
+#### 步骤 7：更新主应用（30 分钟，环境配置增强）
 
 **文件**：`mobile/lib/main.dart`
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';  // 新增
 import 'services/auth_service.dart';
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
+import 'config.dart';  // 新增
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+Future<void> main() async {
+  // ✅ 安全改进：加载环境变量
+  await dotenv.load();
 
-  // 初始化认证服务
-  authService = AuthService(
-    baseUrl: 'http://localhost:8000', // 开发环境
-    // baseUrl: 'https://api.example.com', // 生产环境
-  );
+  // ✅ 安全改进：验证生产环境配置
+  if (Config.isProduction && Config.apiBaseUrl.startsWith('http://')) {
+    throw Exception('生产环境必须使用 HTTPS');
+  }
 
   runApp(const MyApp());
 }
@@ -702,7 +987,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => AuthProvider(authService),
+      create: (_) => AuthProvider(AuthService(baseUrl: Config.apiBaseUrl)),
       child: MaterialApp(
         title: 'BDC-AI',
         theme: ThemeData(
@@ -751,7 +1036,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -778,30 +1063,85 @@ class _SplashScreenState extends State<SplashScreen> {
 - **框架**：NiceGUI
 - **HTTP 客户端**：requests
 - **会话管理**：app.storage.user
-- **UI 组件**：内置组件
+- **配置管理**：环境变量
 
 ### 实施步骤
 
-#### 步骤 1：创建认证工具类（30 分钟）
+#### 步骤 1：创建配置文件（新增，15 分钟）
+
+**文件**：`pc_ui/config.py`
+
+```python
+"""
+PC-UI 配置管理
+"""
+import os
+
+
+class Config:
+    """配置类"""
+
+    @staticmethod
+    def get_api_base_url():
+        """获取 API 基础地址"""
+        # 从环境变量读取
+        api_url = os.getenv('BDC_API_URL')
+        if api_url:
+            return api_url
+
+        # 根据环境变量判断
+        environment = os.getenv('ENVIRONMENT', 'development')
+
+        if environment == 'production':
+            # 生产环境：强制 HTTPS
+            return 'https://api.example.com'
+        elif environment == 'testing':
+            return 'https://test-api.example.com'
+        else:
+            # 开发环境
+            return 'http://localhost:8000'
+
+    @staticmethod
+    def is_production():
+        """是否生产环境"""
+        return os.getenv('ENVIRONMENT', 'development') == 'production'
+
+    @staticmethod
+    def is_development():
+        """是否开发环境"""
+        return os.getenv('ENVIRONMENT', 'development') == 'development'
+
+    @staticmethod
+    def allow_default_login():
+        """是否允许默认登录（仅开发环境）"""
+        return not Config.is_production()
+```
+
+#### 步骤 2：创建认证管理器（30 分钟，安全增强）
 
 **文件**：`pc_ui/auth/auth_manager.py`
 
 ```python
 """
-PC-UI 认证管理器
+PC-UI 认证管理器（安全增强版）
 """
 import requests
 from typing import Optional
 from nicegui import app
+from .config import Config
 
 
 class AuthManager:
     """认证管理器"""
 
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = None):
+        if base_url is None:
+            base_url = Config.get_api_base_url()
+
         self.base_url = base_url
         self.session = requests.Session()
         self.token: Optional[str] = None
+        self.refresh_token: Optional[str] = None  # 新增
         self.user: Optional[dict] = None
 
         # 尝试从存储恢复会话
@@ -811,6 +1151,7 @@ class AuthManager:
         """从存储恢复会话"""
         if 'user' in app.storage.user:
             self.token = app.storage.user.get('token')
+            self.refresh_token = app.storage.user.get('refresh_token')  # 新增
             self.user = app.storage.user.get('user')
             if self.token:
                 self.session.headers.update({
@@ -822,15 +1163,33 @@ class AuthManager:
     def _save_session(self):
         """保存会话到存储"""
         app.storage.user['token'] = self.token
+        app.storage.user['refresh_token'] = self.refresh_token  # 新增
         app.storage.user['user'] = self.user
 
     def _clear_session(self):
         """清除会话"""
         self.token = None
+        self.refresh_token = None
         self.user = None
         if 'user' in app.storage.user:
             del app.storage.user['token']
+            del app.storage.user['refresh_token']
             del app.storage.user['user']
+
+    def _handle_401(self, response: requests.Response) -> bool:
+        """✅ 新增：处理 401 错误"""
+        if response.status_code == 401:
+            # Token 过期，自动登出
+            self.logout()
+
+            # 显示提示
+            ui.notify('登录已过期，请重新登录', type='warning')
+
+            # 跳转到登录页
+            ui.navigate('/login')
+
+            return True
+        return False
 
     def login(self, username: str, password: str) -> tuple[bool, str]:
         """
@@ -849,6 +1208,7 @@ class AuthManager:
             if response.status_code == 200:
                 data = response.json()
                 self.token = data['access_token']
+                self.refresh_token = data.get('refresh_token')  # 新增
                 self.user = data.get('user')
 
                 # 更新会话头
@@ -879,37 +1239,71 @@ class AuthManager:
         """检查是否已认证"""
         return self.token is not None
 
+    def has_permission(self, permission: str) -> bool:
+        """✅ 新增：检查用户权限"""
+        if not self.user:
+            return False
+
+        if self.user.get('is_superuser', False):
+            return True
+
+        permissions = self.user.get('permissions', [])
+        return permission in permissions
+
     def get(self, endpoint: str, **kwargs) -> requests.Response:
-        """GET 请求"""
-        return self.session.get(f"{self.base_url}{endpoint}", **kwargs)
+        """GET 请求（✅ 带 401 处理）"""
+        response = self.session.get(f"{self.base_url}{endpoint}", **kwargs)
+
+        # 检查 401
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
 
     def post(self, endpoint: str, **kwargs) -> requests.Response:
-        """POST 请求"""
-        return self.session.post(f"{self.base_url}{endpoint}", **kwargs)
+        """POST 请求（✅ 带 401 处理）"""
+        response = self.session.post(f"{self.base_url}{endpoint}", **kwargs)
+
+        # 检查 401
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
 
     def put(self, endpoint: str, **kwargs) -> requests.Response:
-        """PUT 请求"""
-        return self.session.put(f"{self.base_url}{endpoint}", **kwargs)
+        """PUT 请求（✅ 带 401 处理）"""
+        response = self.session.put(f"{self.base_url}{endpoint}", **kwargs)
+
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
 
     def delete(self, endpoint: str, **kwargs) -> requests.Response:
-        """DELETE 请求"""
-        return self.session.delete(f"{self.base_url}{endpoint}", **kwargs)
+        """DELETE 请求（✅ 带 401 处理）"""
+        response = self.session.delete(f"{self.base_url}{endpoint}", **kwargs)
+
+        if self._handle_401(response):
+            raise Exception('Unauthorized')
+
+        return response
 
 
 # 全局实例
 auth_manager = AuthManager()
 ```
 
-#### 步骤 2：创建登录页面（1 小时）
+#### 步骤 3：创建登录页面（1 小时，安全增强）
 
 **文件**：`pc_ui/pages/login.py`
 
 ```python
 """
-登录页面
+登录页面（安全增强版）
 """
 from nicegui import ui, app
 from ..auth.auth_manager import auth_manager
+from ..config import Config
 
 
 def show_login_page():
@@ -924,16 +1318,22 @@ def show_login_page():
             ui.label('BDC-AI').classes('text-4xl font-bold text-center mb-2')
             ui.label('建筑节能管理平台').classes('text-center text-gray-600 mb-8')
 
+            # ✅ 安全改进：环境标识
+            if Config.is_development():
+                ui.label('开发环境', size='xs').classes('text-yellow-600 mb-4')
+            elif Config.is_production():
+                ui.label('生产环境', size='xs').classes('text-red-600 mb-4')
+
             # 登录表单
             username = ui.input(
                 '用户名',
-                placeholder='admin',
+                placeholder='请输入用户名',
                 validation=lambda x: True if x else '请输入用户名'
             ).props('outlined').classes('w-full mb-4')
 
             password = ui.input(
                 '密码',
-                placeholder='admin123',
+                placeholder='请输入密码',
                 password=True,
                 validation=lambda x: True if x else '请输入密码'
             ).props('outlined').classes('w-full mb-4')
@@ -943,8 +1343,15 @@ def show_login_page():
             async def do_login():
                 """执行登录"""
                 message.text = ''
-                username.value = username.value or 'admin'
-                password.value = password.value or 'admin123'
+
+                # ✅ 安全改进：不允许空输入
+                if not username.value or not password.value:
+                    message.text = '请输入用户名和密码'
+                    return
+
+                # ✅ 安全改进：开发环境提示（但不允许默认登录）
+                if Config.is_development() and not username.value:
+                    message.text = '提示：开发环境可使用 admin/admin123'
 
                 success, msg = auth_manager.login(username.value, password.value)
 
@@ -958,9 +1365,6 @@ def show_login_page():
                     ui.notify(msg, type='negative')
 
             ui.button('登录', on_click=do_login).props('push').classes('w-full')
-
-            # 记住我选项
-            # checkbox = ui.checkbox('记住我').classes('mt-4')
 
 
 def register_login_route():
@@ -976,13 +1380,13 @@ def register_login_route():
         show_login_page()
 ```
 
-#### 步骤 3：创建主页面（1 小时）
+#### 步骤 4：创建主页面（1 小时，权限控制）
 
 **文件**：`pc_ui/pages/home.py`
 
 ```python
 """
-主页面
+主页面（权限增强版）
 """
 from nicegui import ui
 from ..auth.auth_manager import auth_manager
@@ -1010,6 +1414,10 @@ def show_home_page():
                 if auth_manager.user:
                     ui.label(f"欢迎, {auth_manager.user.get('username')}")
 
+                    # ✅ 新增：显示角色
+                    role = auth_manager.user.get('role_name', '用户')
+                    ui.label(f"({role})").classes('text-sm opacity-75')
+
                 ui.button(
                     icon='logout',
                     on_click=lambda: (
@@ -1019,27 +1427,40 @@ def show_home_page():
                     )
                 ).props('outline round')
 
-    # 侧边栏
+    # 侧边栏（✅ 权限控制）
     with ui.left_drawer().classes('bg-white'):
         ui.label('菜单').classes('text-lg font-bold mb-4')
 
+        # 项目管理（所有用户）
         ui.menu_item(
             '项目列表',
             icon='folder',
             on_click=lambda: load_projects()
         )
 
-        ui.menu_item(
-            '建筑管理',
-            icon='apartment',
-            on_click=lambda: ui.notify('开发中...')
-        )
+        # 建筑管理（需要权限）
+        if auth_manager.has_permission('buildings.view'):
+            ui.menu_item(
+                '建筑管理',
+                icon='apartment',
+                on_click=lambda: load_buildings()
+            )
 
-        ui.menu_item(
-            '资产管理',
-            icon='inventory_2',
-            on_click=lambda: ui.notify('开发中...')
-        )
+        # 资产管理（需要权限）
+        if auth_manager.has_permission('assets.view'):
+            ui.menu_item(
+                '资产管理',
+                icon='inventory_2',
+                on_click=lambda: load_assets()
+            )
+
+        # 系统管理（仅管理员）
+        if auth_manager.user.get('is_superuser'):
+            ui.menu_item(
+                '系统管理',
+                icon='settings',
+                on_click=lambda: ui.notify('开发中...')
+            )
 
     # 主内容区
     with ui.column().classes('p-6 w-full'):
@@ -1071,7 +1492,6 @@ def show_home_page():
 
                 try:
                     response = auth_manager.get('/api/v1/projects/')
-                    response.raise_for_status()
                     projects = response.json()
 
                     with projects_container:
@@ -1090,8 +1510,12 @@ def show_home_page():
                                 ui.label(f"类型：{project.get('type', 'N/A')}").classes('text-sm text-gray-500')
 
                 except Exception as e:
-                    with projects_container:
-                        ui.label(f'加载失败：{str(e)}').classes('text-red-600')
+                    if 'Unauthorized' in str(e):
+                        # 401 已处理，不需要额外提示
+                        pass
+                    else:
+                        with projects_container:
+                            ui.label(f'加载失败：{str(e)}').classes('text-red-600')
 
             # 页面加载时自动加载项目
             load_projects()
@@ -1110,202 +1534,315 @@ def register_home_route():
         show_home_page()
 ```
 
-#### 步骤 4：更新主应用（30 分钟）
-
-**文件**：`pc_ui/main.py`
-
-```python
-"""
-BDC-AI PC-UI 主应用
-"""
-from nicegui import ui
-from auth.auth_manager import auth_manager
-from pages.login import register_login_route
-from pages.home import register_home_route
-
-
-def create_app():
-    """创建应用"""
-
-    # 注册路由
-    register_login_route()
-    register_home_route()
-
-    # 根路由重定向
-    @ui.page('/')
-    def index():
-        """根路由"""
-        if auth_manager.is_authenticated():
-            return show_home_page()
-        else:
-            return ui.navigate('/login')
-
-    # 启动应用
-    ui.run(
-        port=8080,
-        title='BDC-AI 管理平台',
-        dark=None,
-        storage_secret='bdc-ai-secret-key-change-in-production'
-    )
-
-
-if __name__ == '__main__':
-    create_app()
-```
-
 ---
 
 ## 测试与验证
 
 ### 移动端测试清单
 
-- [ ] 登录功能测试
-  - [ ] 正确凭证登录成功
-  - [ ] 错误凭证显示错误
-  - [ ] Token 正确存储
-- [ ] 自动 Token 刷新
-  - [ ] 401 错误自动刷新
-  - [ ] 刷新成功后重试请求
-  - [ ] 刷新失败跳转登录页
-- [ ] 登出功能
-  - [ ] 清除本地 Token
-  - [ ] 返回登录页
-- [ ] API 调用
-  - [ ] 自动添加认证头
-  - [ ] 数据正确加载
+#### 基础功能
+- [ ] 正确凭证登录成功
+- [ ] 错误凭证显示错误
+- [ ] Token 正确存储（flutter_secure_storage）
+- [ ] Token 正确传递（Authorization 头）
+
+#### Token 刷新
+- [ ] Token 过期自动刷新（401 拦截器）
+- [ ] 刷新成功后重试原请求
+- [ ] 刷新失败跳转登录页
+- [ ] 并发请求不会重复刷新（互斥锁）
+
+#### 登出功能
+- [ ] 清除本地 Token
+- [ ] 返回登录页
+- [ ] 自动下次登录
+
+#### 环境配置
+- [ ] 开发环境使用 HTTP（本地）
+- [ ] 生产环境使用 HTTPS（验证证书）
+- [ ] API 地址可配置（环境变量）
 
 ### PC-UI 测试清单
 
-- [ ] 登录功能
-  - [ ] 正确凭证登录成功
-  - [ ] 错误凭证显示错误
-  - [ ] 会话正确保存
-- [ ] 会话保持
-  - [ ] 刷新页面保持登录
-  - [ ] 关闭浏览器重开保持登录
-- [ ] 登出功能
-  - [ ] 清除会话
-  - [ ] 跳转登录页
-- [ ] API 调用
-  - [ ] 自动添加认证头
-  - [ ] 401 错误处理
+#### 基础功能
+- [ ] 正确凭证登录成功
+- [ ] 错误凭证显示错误
+- [ ] 会话正确保存（app.storage.user）
+- [ ] 刷新页面保持登录
+
+#### 安全要求
+- [ ] ❌ 开发环境：可显示默认账号提示，但不自动登录
+- [ ] ✅ 生产环境：完全移除默认账号行为
+- [ ] ✅ 生产环境：强制使用 HTTPS
+
+#### 401 处理
+- [ ] Token 过期自动登出
+- [ ] 显示"登录已过期"提示
+- [ ] 自动跳转登录页
+- [ ] 加载项目时 401 正确处理
+
+#### 权限控制
+- [ ] 根据角色隐藏菜单
+- [ ] 无权限功能点击返回 403
+- [ ] 后端权限检查正常
 
 ### 联调测试
 
+#### 多端登录
 - [ ] 移动端和 PC-UI 同时登录同一账号
 - [ ] Token 刷新不影响其他端
 - [ ] 登出后其他端仍可用
+
+#### 安全校验
+- [ ] 使用新账号登录
+- [ ] 验证权限检查（403）
+- [ ] 验证 401 自动登出
+- [ ] 验证 HTTPS 连接（生产环境）
 
 ---
 
 ## 部署上线
 
-### 移动端部署
+### 环境配置
+
+#### 移动端环境配置
+
+**文件**：`.env`（项目根目录）
 
 ```bash
-# 1. 更新 API 地址
-# mobile/lib/main.dart
-authService = AuthService(
-  baseUrl: 'https://api.example.com', // 生产环境
-);
+# 开发环境
+ENVIRONMENT=development
+API_BASE_URL=http://localhost:8000
+PRODUCTION=false
+ENABLE_DEBUG=true
 
-# 2. 构建发布版本
-flutter build apk --release
-flutter build ios --release
+# 测试环境
+ENVIRONMENT=testing
+API_BASE_URL=https://test-api.example.com
+PRODUCTION=false
+ENABLE_DEBUG=true
 
-# 3. 签名和发布
-# Android: 上传 .apk 到 Google Play
-# iOS: 上传 .ipa 到 App Store
+# 生产环境
+ENVIRONMENT=production
+API_BASE_URL=https://api.example.com
+PRODUCTION=true
+ENABLE_DEBUG=false
 ```
 
-### PC-UI 部署
+**启动验证**：
+```dart
+// 在 main.dart 中添加验证
+if (Config.isProduction && Config.apiBaseUrl.startsWith('http://')) {
+  throw Exception('生产环境必须使用 HTTPS');
+}
+```
+
+#### PC-UI 环境配置
+
+**文件**：`.env`（PC-UI 目录或系统环境变量）
 
 ```bash
-# 1. 配置生产环境 URL
-# pc_ui/auth/auth_manager.py
-auth_manager = AuthManager(base_url="https://api.example.com")
+# 开发环境
+ENVIRONMENT=development
+BDC_API_URL=http://localhost:8000
 
-# 2. 启动服务
-python pc_ui/main.py
+# 测试环境
+ENVIRONMENT=testing
+BDC_API_URL=https://test-api.example.com
 
-# 3. 使用 systemd 管理进程
-# 4. 配置 Nginx 反向代理
-# 5. 启用 HTTPS
+# 生产环境
+ENVIRONMENT=production
+BDC_API_URL=https://api.example.com
 ```
+
+### 部署检查清单
+
+#### 移动端部署
+
+- [ ] 配置生产环境 API 地址（HTTPS）
+- [ ] 移除开发环境默认账号
+- [ ] 启用证书固定（Certificate Pinning）
+- [ ] 关闭调试模式
+- [ ] 签名和打包应用
+
+#### PC-UI 部署
+
+- [ ] 配置生产环境 API 地址（HTTPS）
+- [ ] 移除开发环境默认账号
+- [ ] 配置反向代理（Nginx）
+- [ ] 启用 HTTPS
+- [ ] 设置强密钥（storage_secret）
+- [ ] 配置防火墙
 
 ---
 
-## 时间估算
+## 最佳实践
 
-| 阶段 | 任务 | 预计时间 | 负责人 |
-|-----|------|---------|--------|
-| **阶段 1：移动端** | | | |
-| 1.1 | 添加依赖 | 5 分钟 | 移动端开发 |
-| 1.2 | 创建数据模型 | 30 分钟 | 移动端开发 |
-| 1.3 | 创建认证服务 | 1 小时 | 移动端开发 |
-| 1.4 | 创建 Provider | 30 分钟 | 移动端开发 |
-| 1.5 | 创建登录页面 | 1 小时 | 移动端开发 |
-| 1.6 | 更新主应用 | 30 分钟 | 移动端开发 |
-| **小计** | | **4 小时** | |
-| **阶段 2：PC-UI** | | | |
-| 2.1 | 创建认证管理器 | 30 分钟 | 后端开发 |
-| 2.2 | 创建登录页面 | 1 小时 | 后端开发 |
-| 2.3 | 创建主页面 | 1 小时 | 后端开发 |
-| 2.4 | 更新主应用 | 30 分钟 | 后端开发 |
-| **小计** | | **3 小时** | |
-| **阶段 3：测试** | | | |
-| 3.1 | 移动端测试 | 1 小时 | QA |
-| 3.2 | PC-UI 测试 | 1 小时 | QA |
-| **小计** | | **2 小时** | |
-| **阶段 4：文档** | | | |
-| 4.1 | 编写用户文档 | 1 小时 | 技术写作 |
-| **小计** | | **1 小时** | |
-| **总计** | | **10 小时** | |
+### 安全最佳实践
+
+#### 1. 环境隔离
+
+**开发环境**：
+- HTTP 允许
+- 默认账号提示（但需手动输入）
+- 详细调试信息
+
+**生产环境**：
+- 强制 HTTPS
+- 完全移除默认账号
+- 最小化日志输出
+- 错误信息脱敏
+
+#### 2. Token 管理
+
+**移动端**：
+- ✅ 使用 flutter_secure_storage（加密存储）
+- ✅ 自动刷新机制
+- ✅ 刷新互斥锁
+- ✅ 刷新失败自动登出
+
+**PC-UI**：
+- ✅ 401 自动登出
+- ⏸ 暂不实现 refresh_token（阶段 4 考虑）
+- ✅ 会话持久化
+
+#### 3. 权限控制
+
+**后端（已完成）**：
+- ✅ 所有业务 API 需要认证
+- ✅ 严格的权限检查
+
+**前端（阶段 4）**：
+- ⏸ 根据角色隐藏菜单（UX 优化）
+- ⏸ 无权限功能显示提示
+- ✅ 后端继续执行权限检查
+
+### 开发最佳实践
+
+#### 1. API 调用规范
+
+```dart
+// ✅ 正确：使用 authService.apiClient
+final response = await authService.apiClient.get('/api/v1/projects/');
+
+// ❌ 错误：直接使用 Dio（会缺少 Token）
+final response = await dio.get('/api/v1/projects/');
+```
+
+```python
+# ✅ 正确：使用 auth_manager
+response = auth_manager.get('/api/v1/projects/')
+
+# ❌ 错误：直接使用 requests（会缺少 Token）
+response = requests.get(f"{auth_manager.base_url}/api/v1/projects/")
+```
+
+#### 2. 错误处理
+
+```dart
+try {
+  final response = await authService.apiClient.get('/api/v1/projects/');
+  // 处理响应
+} on UnauthorizedException {
+  // 已自动登出，无需额外处理
+} on Exception catch (e) {
+  // 其他错误
+}
+```
+
+```python
+try:
+    response = auth_manager.get('/api/v1/projects/')
+    # 处理响应
+except Exception as e:
+    if 'Unauthorized' in str(e):
+        # 已自动登出，无需额外处理
+    pass
+```
+
+#### 3. 测试驱动
+
+- ✅ 先测试认证流程
+- ✅ 再测试业务 API
+- ✅ 最后测试权限控制
 
 ---
 
 ## 附录
 
-### A. 配置文件
+### A. 文件结构
 
-**移动端配置**：`mobile/lib/config.dart`
+```
+mobile/
+├── lib/
+│   ├── config.dart               # ✅ 新增：配置管理
+│   ├── models/
+│   │   └── auth.dart              # ✅ 数据模型
+│   ├── services/
+│   │   └── auth_service.dart     # ✅ 认证服务
+│   ├── providers/
+│   │   └── auth_provider.dart    # ✅ Provider
+│   ├── screens/
+│   │   ├── login_screen.dart     # ✅ 登录页
+│   │   └── splash_screen.dart    # ✅ 启动页
+│   ├── main.dart                  # ✅ 主应用
+│   └── .env                      # ✅ 环境配置
 
-```dart
-class Config {
-  static const String apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://localhost:8000',
-  );
-
-  static const bool enableDebug = bool.fromEnvironment('DEBUG', defaultValue: true);
-}
+pc_ui/
+├── config.py                    # ✅ 新增：配置管理
+├── auth/
+│   └── auth_manager.py         # ✅ 认证管理器（增强）
+├── pages/
+│   ├── login.py                 # ✅ 登录页（增强）
+│   └── home.py                  # ✅ 主页（权限控制）
+└── main.py                     # ✅ 主应用
 ```
 
-**PC-UI 配置**：`pc_ui/config.py`
+### B. 环境变量参考
 
-```python
-import os
+**移动端**：
 
-class Config:
-    API_BASE_URL = os.getenv(
-        'BDC_API_URL',
-        'http://localhost:8000'
-    )
+```bash
+# .env
+ENVIRONMENT=development
+API_BASE_URL=http://localhost:8000
+PRODUCTION=false
+ENABLE_DEBUG=true
 ```
 
-### B. 错误处理
+**PC-UI**：
 
-**常见错误及处理**：
+```bash
+# 系统环境变量或 .env
+ENVIRONMENT=development
+BDC_API_URL=http://localhost:8000
+```
 
-| 错误 | 原因 | 处理方式 |
-|-----|------|---------|
-| 401 Unauthorized | Token 过期 | 自动刷新或跳转登录 |
-| 403 Forbidden | 权限不足 | 提示用户权限不足 |
-| 500 Server Error | 服务器错误 | 显示友好错误信息 |
-| Network Error | 网络问题 | 提示检查网络连接 |
+### C. 安全检查清单
+
+**开发阶段**：
+- [ ] 环境配置正确
+- [ ] 默认账号仅提示，不自动填充
+- [ ] HTTPS 验证逻辑已添加
+- [ ] 401 处理逻辑已添加
+
+**部署前**：
+- [ ] 生产环境配置正确
+- [ ] API 地址使用 HTTPS
+- [ ] 默认账号完全移除
+- [ ] 调试模式关闭
+- [ ] 安全密钥更新
+
+**部署后**：
+- [ ] 验证 HTTPS 证书
+- [ ] 测试登录登出
+- [ ] 测试 Token 过期
+- [ ] 测试权限检查
+- [ ] 验证多端登录
 
 ---
 
 **文档维护**：BDC-AI 开发团队
 **最后更新**：2026-01-25
-**版本**：v1.0
+**版本**：v2.0（安全增强版）
+**上一版本**：v1.0（初版）

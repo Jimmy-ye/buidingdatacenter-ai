@@ -19,12 +19,28 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.config.settings import get_settings
+from desktop.nicegui_app.config import Config
+from desktop.nicegui_app.ui.login_page import show_login_page
 
-BACKEND_BASE_URL = "http://127.0.0.1:8000/api/v1"
+BACKEND_BASE_URL = Config.get_api_base_url()
 SETTINGS = get_settings()
 ASSET_WEB_PREFIX = "/local_assets"
 BASE_ASSET_DIR = os.path.abspath(SETTINGS.local_storage_dir)
 app.add_static_files(ASSET_WEB_PREFIX, BASE_ASSET_DIR)
+
+# 延迟导入认证模块，使用单例模式
+_auth_manager_instance = None
+
+def get_auth_manager():
+    """
+    获取认证管理器单例
+    确保整个应用使用同一个实例，避免 token 丢失
+    """
+    global _auth_manager_instance
+    if _auth_manager_instance is None:
+        from desktop.nicegui_app.auth_manager import auth_manager
+        _auth_manager_instance = auth_manager
+    return _auth_manager_instance
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
 UI_VERSION = "PC UI v0.3.8-system-primary"
@@ -109,8 +125,13 @@ from desktop.nicegui_app.events import (
 
 
 async def fetch_json(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+    # 添加认证头
+    headers = {}
+    if get_auth_manager().is_authenticated():
+        headers['Authorization'] = f'Bearer {get_auth_manager().token}'
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(f"{BACKEND_BASE_URL}{path}", params=params)
+        resp = await client.get(f"{BACKEND_BASE_URL}{path}", params=params, headers=headers)
         resp.raise_for_status()
         return resp.json()
 
@@ -324,8 +345,22 @@ def main_page() -> None:
                 with ui.row().classes("items-center justify-between w-full"):
                     project_title = ui.label("未选择项目").classes("text-h6")
                     with ui.row().classes("items-center q-gutter-sm"):
+                        # 显示当前用户
+                        if get_auth_manager().user:
+                            ui.label(f"用户: {get_auth_manager().user.get('username', 'Unknown')}").classes("text-caption")
+
                         ui.label(UI_VERSION).classes("text-caption text-grey")
                         refresh_button = ui.button(icon="refresh").props("flat round dense")
+
+                        # 登出按钮
+                        ui.button(
+                            icon='logout',
+                            on_click=lambda: (
+                                get_auth_manager().logout(),
+                                ui.notify('已登出', type='info'),
+                                ui.navigate.to('/login')
+                            )
+                        ).props('outline round dense')
                 project_meta = ui.label("").classes("text-caption text-grey")
 
                 ui.separator()
@@ -1013,10 +1048,15 @@ def main_page() -> None:
         to_delete = set(selected_ids)
 
         try:
+            # 添加认证头
+            headers = {}
+            if get_auth_manager().is_authenticated():
+                headers['Authorization'] = f'Bearer {get_auth_manager().token}'
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 for asset_id in selected_ids:
                     try:
-                        resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id}")
+                        resp = await client.delete(f"{BACKEND_BASE_URL}/assets/{asset_id}", headers=headers)
                         resp.raise_for_status()
                     except Exception as exc:  # noqa: BLE001
                         ui.notify(f"删除资产 {asset_id} 失败: {exc}", color="negative")
@@ -1225,10 +1265,44 @@ def main_page() -> None:
     update_asset_detail()
 
 
+@ui.page('/login')
+def login_route():
+    """登录页面"""
+    is_auth = get_auth_manager().is_authenticated()
+    print(f"[DEBUG] 访问登录页 - 认证状态: {is_auth}")
+
+    if is_auth:
+        print("[DEBUG] 已认证，跳转到主页")
+        return ui.navigate.to('/')
+
+    print("[DEBUG] 未认证，显示登录页面")
+    show_login_page()
+
+
 @ui.page("/")
 def index_page() -> None:
+    # 检查认证状态
+    is_auth = get_auth_manager().is_authenticated()
+    print(f"[DEBUG] 访问主页 - 认证状态: {is_auth}")
+
+    if not is_auth:
+        ui.notify('请先登录', type='warning')
+        print("[DEBUG] 未认证，跳转到登录页")
+        ui.navigate.to('/login')
+        # 不渲染主页面内容
+        return
+
+    # 已认证，显示主页面
+    print("[DEBUG] 已认证，显示主页面")
     main_page()
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title="BDC-AI 工程结构与资产浏览", host="0.0.0.0", port=8080, dark=True)
+    # storage_secret 用于会话持久化（认证 Token）
+    ui.run(
+        title="BDC-AI 工程结构与资产浏览",
+        host="0.0.0.0",
+        port=8080,
+        dark=True,
+        storage_secret={'secret': 'bdc-ai-pc-ui-secret-key-change-in-production'}
+    )

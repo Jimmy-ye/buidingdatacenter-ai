@@ -40,6 +40,14 @@ env/
 htmlcov/
 .tox/
 
+# Test scripts (diagnostic, temporary)
+test_*.py
+*_test.py
+*_test.py.*
+debug_*.py
+*/test_*.py
+tests/TEST_RESULTS.md
+
 # Local data (SQLite database, uploaded files, etc.)
 # Keep data/ directory but ignore contents except for .gitkeep
 data/*
@@ -47,6 +55,7 @@ data/*
 *.db
 *.sqlite
 *.sqlite3
+test_*.db
 
 # Environment variables
 .env
@@ -58,6 +67,9 @@ data/*
 
 # Logs
 *.log
+
+# NiceGUI runtime files (user sessions, tokens, etc.)
+.nicegui/
 
 # OS
 .DS_Store

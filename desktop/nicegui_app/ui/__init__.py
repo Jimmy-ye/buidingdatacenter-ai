@@ -7,6 +7,8 @@ UI 组件模块
 创建时间: 2025-01-22
 """
 
+from desktop.nicegui_app.ui import login_page
+
 from desktop.nicegui_app.ui.dialogs import (
     ProjectDialog,
     EngineeringNodeDialog,
