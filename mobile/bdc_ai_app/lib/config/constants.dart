@@ -1,7 +1,7 @@
 /// 应用配置常量
 class AppConfig {
-  /// API 基础 URL
-  static const String baseUrl = 'http://localhost:8000';
+  /// API 基础 URL（从 app_config 读取）
+  static String get baseUrl => _AppConfigInternal.apiBaseUrl;
 
   /// API 超时时间（毫秒）
   static const int apiTimeout = 30000;
@@ -11,6 +11,14 @@ class AppConfig {
 
   /// 离线缓存时长（小时）
   static const int cacheDurationHours = 24;
+}
+
+/// 内部配置（来自 app_config.dart）
+class _AppConfigInternal {
+  /// 从 app_config.dart 读取
+  static String get apiBaseUrl => String.fromEnvironment('API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8000'
+  );
 }
 
 /// API 端点路径
