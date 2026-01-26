@@ -46,9 +46,9 @@ def show_401_test_page():
                 # 设置无效 token
                 auth_manager._token = "invalid_token_12345"
 
-                # 尝试调用 API
+                # 尝试调用 API（注意：base_url 已包含 /api/v1）
                 response = requests.get(
-                    f"{auth_manager.base_url}/api/v1/projects/",
+                    f"{auth_manager.base_url}/projects/",
                     headers={"Authorization": f"Bearer {auth_manager._token}"}
                 )
 
@@ -76,9 +76,9 @@ def show_401_test_page():
                 # 构造一个过期的 JWT token（expired signature）
                 expired_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2MDk0NTkyMDAsInN1YiI6ImFkbWluIn0.signature"
 
-                # 尝试调用 API
+                # 尝试调用 API（注意：base_url 已包含 /api/v1）
                 response = requests.get(
-                    f"{auth_manager.base_url}/api/v1/projects/",
+                    f"{auth_manager.base_url}/projects/",
                     headers={"Authorization": f"Bearer {expired_token}"}
                 )
 
@@ -106,9 +106,9 @@ def show_401_test_page():
                 # 临时移除 token
                 auth_manager._token = None
 
-                # 尝试调用 API（会触发 401）
+                # 尝试调用 API（会触发 401，注意：base_url 已包含 /api/v1）
                 try:
-                    response = auth_manager.get('/api/v1/projects/')
+                    response = auth_manager.get('/projects/')
                 except Exception as e:
                     ui.notify(f'API 调用异常（预期行为）: {str(e)}', type='info')
 
