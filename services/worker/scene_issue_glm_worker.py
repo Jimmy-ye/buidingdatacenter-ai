@@ -23,7 +23,9 @@ BACKEND_BASE_URL = os.getenv("BDC_BACKEND_BASE_URL", "http://127.0.0.1:8000").rs
 # 默认使用项目根目录下的 data/assets；如果配置为相对路径，则基于项目根目录解析
 LOCAL_STORAGE_DIR = os.getenv("BDC_LOCAL_STORAGE_DIR", "data/assets")
 if not os.path.isabs(LOCAL_STORAGE_DIR):
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]
+    # 获取项目根目录（从 services/worker 向上 3 级）
+    # 使用明确的 parent 调用，避免 .parents[] 在 Windows 上的问题
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
     LOCAL_STORAGE_DIR = str(PROJECT_ROOT / LOCAL_STORAGE_DIR)
 
 # 可选：仅处理某个项目的 scene_issue 资产
