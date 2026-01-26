@@ -48,6 +48,20 @@ def init_permissions(db: Session):
         # 系统管理权限
         {"code": "system:config", "name": "系统配置", "resource": "system", "action": "config", "description": "系统配置"},
         {"code": "audit:read", "name": "查看审计日志", "resource": "audit", "action": "read", "description": "查看审计日志"},
+
+        # 工程结构权限（PC-UI 需要）
+        {"code": "structures:create", "name": "创建结构", "resource": "structures", "action": "create", "description": "创建楼栋/系统/区域/设备"},
+        {"code": "structures:read", "name": "查看结构", "resource": "structures", "action": "read", "description": "查看工程结构"},
+        {"code": "structures:update", "name": "更新结构", "resource": "structures", "action": "update", "description": "更新工程结构"},
+        {"code": "structures:delete", "name": "删除结构", "resource": "structures", "action": "delete", "description": "删除工程结构"},
+
+        # 资产操作权限（PC-UI 需要）
+        {"code": "assets:upload", "name": "上传资产", "resource": "assets", "action": "upload", "description": "上传多模态资产"},
+        {"code": "assets:read", "name": "查看资产", "resource": "assets", "action": "read", "description": "查看资产列表和详情"},
+
+        # OCR 和 LLM 权限（PC-UI 需要）
+        {"code": "ocr:run", "name": "运行OCR", "resource": "ocr", "action": "run", "description": "运行OCR识别"},
+        {"code": "llm:run", "name": "运行LLM", "resource": "llm", "action": "run", "description": "运行大模型分析"},
     ]
 
     for perm_data in permissions_data:
@@ -143,36 +157,63 @@ def init_users(db: Session):
     """初始化用户数据"""
     print("正在初始化用户...")
 
-    # 检查是否已有管理员用户
-    existing_admin = db.query(User).filter(User.username == "admin").first()
-    if existing_admin:
-        print(f"  [已存在] 管理员用户: admin")
-        print(f"    ID: {existing_admin.id}")
-        print(f"    Email: {existing_admin.email or '未设置'}")
-        return
+    # 定义默认管理员列表
+    admin_users = [
+        {
+            "username": "yerui",
+            "password": "ye123456",
+            "email": "yerui@bdc-ai.com",
+            "full_name": "超级管理员",
+            "is_superuser": True
+        },
+        {
+            "username": "admin",
+            "password": "admin123",
+            "email": "admin@bdc-ai.com",
+            "full_name": "系统管理员",
+            "is_superuser": True
+        }
+    ]
 
-    # 创建默认管理员
-    admin_user = User(
-        username="admin",
-        hashed_password=get_password_hash("admin123"),
-        email="admin@bdc-ai.com",
-        full_name="系统管理员",
-        phone="",
-        is_active=True,
-        is_superuser=True
-    )
-    db.add(admin_user)
-    db.flush()
-    print(f"  [创建] 管理员用户: admin")
-    print(f"    密码: admin123 (请及时修改)")
-    print(f"    ID: {admin_user.id}")
-
-    # 分配超级管理员角色
+    # 超级管理员角色
     superadmin_role = db.query(Role).filter(Role.name == "superadmin").first()
-    if superadmin_role:
-        user_role = UserRole(user_id=admin_user.id, role_id=superadmin_role.id)
-        db.add(user_role)
-        print(f"    -> 已分配角色: {superadmin_role.display_name}")
+
+    for admin_info in admin_users:
+        existing_user = db.query(User).filter(User.username == admin_info["username"]).first()
+        if existing_user:
+            print(f"  [已存在] 管理员用户: {admin_info['username']}")
+            print(f"    ID: {existing_user.id}")
+            print(f"    Email: {existing_user.email or '未设置'}")
+            print(f"    is_superuser: {existing_user.is_superuser}")
+
+            # 如果不是超级用户，更新为超级用户
+            if not existing_user.is_superuser:
+                existing_user.is_superuser = True
+                db.commit()
+                print(f"    -> 已更新为超级用户")
+        else:
+            # 创建新管理员用户
+            admin_user = User(
+                username=admin_info["username"],
+                hashed_password=get_password_hash(admin_info["password"]),
+                email=admin_info["email"],
+                full_name=admin_info["full_name"],
+                phone="",
+                is_active=True,
+                is_superuser=admin_info["is_superuser"]
+            )
+            db.add(admin_user)
+            db.flush()
+            print(f"  [创建] 管理员用户: {admin_info['username']}")
+            print(f"    密码: {admin_info['password']} (请及时修改)")
+            print(f"    ID: {admin_user.id}")
+            print(f"    is_superuser: {admin_info['is_superuser']}")
+
+            # 分配超级管理员角色
+            if superadmin_role:
+                user_role = UserRole(user_id=admin_user.id, role_id=superadmin_role.id)
+                db.add(user_role)
+                print(f"    -> 已分配角色: {superadmin_role.display_name}")
 
     db.commit()
     print("用户初始化完成！\n")

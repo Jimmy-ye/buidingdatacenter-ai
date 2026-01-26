@@ -71,6 +71,16 @@ class UserInfo(BaseModel):
         from_attributes = True
 
 
+class PermissionInfoSimple(BaseModel):
+    """权限信息（简化版）"""
+    code: str
+    name: str
+    description: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
 class UserRoleInfo(BaseModel):
     """用户角色信息"""
     id: UUID
@@ -82,9 +92,22 @@ class UserRoleInfo(BaseModel):
         from_attributes = True
 
 
+class UserRoleInfoWithPermissions(UserRoleInfo):
+    """用户角色信息（包含权限）"""
+    permissions: List[PermissionInfoSimple] = Field(default_factory=list, description="角色权限列表")
+
+
 class UserDetail(UserInfo):
     """用户详细信息"""
     roles: List[UserRoleInfo] = Field(default_factory=list, description="用户角色列表")
+
+    class Config:
+        from_attributes = True
+
+
+class UserDetailWithPermissions(UserInfo):
+    """用户详细信息（包含权限）"""
+    roles: List[UserRoleInfoWithPermissions] = Field(default_factory=list, description="用户角色列表（含权限）")
 
     class Config:
         from_attributes = True

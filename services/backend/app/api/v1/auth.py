@@ -19,6 +19,7 @@ from ...schemas.auth import (
     ChangePasswordRequest,
     UserInfo,
     UserDetail,
+    UserDetailWithPermissions,
     RoleInfo,
     RoleDetail,
     PermissionInfo,
@@ -106,7 +107,7 @@ def logout(
 
 # ===== 当前用户信息 =====
 
-@router.get("/me", response_model=UserDetail, summary="获取当前用户信息")
+@router.get("/me", response_model=UserDetailWithPermissions, summary="获取当前用户信息")
 def get_current_user_info(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -118,6 +119,24 @@ def get_current_user_info(
     ).filter(
         UserRole.user_id == current_user.id
     ).all()
+
+    # 查询用户的所有权限
+    if current_user.is_superuser:
+        # 超级用户：获取所有权限
+        user_permissions = db.query(Permission).order_by(Permission.resource, Permission.action).all()
+        print(f"DEBUG: Superuser {current_user.username}, permissions count: {len(user_permissions)}")
+    else:
+        # 普通用户：查询角色的权限
+        user_permissions = db.query(Permission).join(
+            RolePermission
+        ).join(
+            Role
+        ).join(
+            UserRole
+        ).filter(
+            UserRole.user_id == current_user.id
+        ).distinct().order_by(Permission.resource, Permission.action).all()
+        print(f"DEBUG: User {current_user.username}, permissions count: {len(user_permissions)}")
 
     # 构建响应
     user_dict = {
@@ -135,7 +154,15 @@ def get_current_user_info(
                 "id": role.id,
                 "name": role.name,
                 "display_name": role.display_name,
-                "level": role.level
+                "level": role.level,
+                "permissions": [
+                    {
+                        "code": perm.code,
+                        "name": perm.name,
+                        "description": perm.description
+                    }
+                    for perm in user_permissions
+                ]
             }
             for role in user_roles
         ]
