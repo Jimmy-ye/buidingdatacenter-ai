@@ -3,6 +3,7 @@
 /// 负责用户登录、Token 管理、自动刷新、权限检查等功能
 
 import 'dart:async';
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
