@@ -1,10 +1,10 @@
 """
 PC-UI 认证管理器
 
-提供登录、登出、Token 管理和自动 401 处理
+提供登录、登出、Token 管理、401 自动处理和权限检查
 """
 import requests
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from nicegui import app, ui
 
 
@@ -27,6 +27,11 @@ class AuthManager:
         self._user: Optional[Dict[str, Any]] = None
         self._token: Optional[str] = None
         self._refresh_token: Optional[str] = None  # 新增：刷新 token
+
+        # 新增：用户详细信息和权限
+        self._user_details: Optional[Dict[str, Any]] = None
+        self._permissions: List[str] = []  # 权限代码列表
+        self._roles: List[Dict[str, Any]] = []  # 角色列表
 
         # 从持久化存储恢复会话
         self._restore_session()
@@ -83,6 +88,9 @@ class AuthManager:
                 app.storage.user['auth_token'] = self._token
                 app.storage.user['auth_refresh_token'] = self._refresh_token  # 新增
                 app.storage.user['auth_user'] = self._user
+
+                # 新增：获取用户详细信息（角色和权限）
+                self._fetch_user_details()
 
                 return True, "登录成功"
             elif response.status_code == 401:
@@ -329,6 +337,160 @@ class AuthManager:
             self._handle_401(response)
 
         return response
+
+    # ============================================================
+    # 权限检查方法
+    # ============================================================
+
+    def _fetch_user_details(self) -> bool:
+        """
+        获取当前用户的详细信息（角色和权限）
+
+        Returns:
+            bool: 是否成功获取
+        """
+        try:
+            # 手动构造请求，确保使用刚获取的 Token
+            headers = {'Authorization': f'Bearer {self._token}'}
+            response = requests.get(
+                f"{self.base_url}/auth/me",
+                headers=headers,
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                user_detail = response.json()
+                self._user_details = user_detail
+
+                # 提取角色和权限
+                self._roles = user_detail.get('roles', [])
+                self._permissions = []
+
+                # 从所有角色中收集权限
+                for role in self._roles:
+                    role_permissions = role.get('permissions', [])
+                    if isinstance(role_permissions, list):
+                        self._permissions.extend(role_permissions)
+
+                print(f"[INFO] 用户权限加载成功:")
+                print(f"  - 角色: {[r.get('name') for r in self._roles]}")
+                print(f"  - 权限数量: {len(self._permissions)}")
+
+                return True
+            else:
+                print(f"[WARNING] 获取用户信息失败: {response.status_code}")
+                return False
+
+        except Exception as e:
+            print(f"[ERROR] 获取用户信息异常: {str(e)}")
+            return False
+
+    def has_permission(self, permission_code: str) -> bool:
+        """
+        检查用户是否拥有指定权限
+
+        Args:
+            permission_code: 权限代码（如 'projects:view', 'assets:delete'）
+
+        Returns:
+            bool: 是否拥有权限
+        """
+        # 超级管理员拥有所有权限
+        if self._user and self._user.get('is_superuser', False):
+            return True
+
+        # 检查权限列表
+        return permission_code in self._permissions
+
+    def has_any_permission(self, permission_codes: List[str]) -> bool:
+        """
+        检查用户是否拥有任一指定权限
+
+        Args:
+            permission_codes: 权限代码列表
+
+        Returns:
+            bool: 是否拥有至少一个权限
+        """
+        return any(self.has_permission(p) for p in permission_codes)
+
+    def has_all_permissions(self, permission_codes: List[str]) -> bool:
+        """
+        检查用户是否拥有所有指定权限
+
+        Args:
+            permission_codes: 权限代码列表
+
+        Returns:
+            bool: 是否拥有所有权限
+        """
+        return all(self.has_permission(p) for p in permission_codes)
+
+    def has_role(self, role_name: str) -> bool:
+        """
+        检查用户是否拥有指定角色
+
+        Args:
+            role_name: 角色名称（如 'admin', 'manager'）
+
+        Returns:
+            bool: 是否拥有角色
+        """
+        # 超级管理员拥有所有角色权限
+        if self._user and self._user.get('is_superuser', False):
+            return True
+
+        # 检查角色列表
+        return any(r.get('name') == role_name for r in self._roles)
+
+    def is_superuser(self) -> bool:
+        """
+        检查是否超级管理员
+
+        Returns:
+            bool: 是否超级管理员
+        """
+        return self._user and self._user.get('is_superuser', False)
+
+    def get_all_permissions(self) -> List[str]:
+        """
+        获取用户的所有权限代码
+
+        Returns:
+            List[str]: 权限代码列表
+        """
+        if self.is_superuser():
+            # 超级管理员拥有所有权限（这里可以返回一个标记）
+            return ['*']  # 特殊标记表示所有权限
+
+        return self._permissions.copy()
+
+    def get_roles(self) -> List[str]:
+        """
+        获取用户的所有角色名称
+
+        Returns:
+            List[str]: 角色名称列表
+        """
+        return [r.get('name', '') for r in self._roles]
+
+    def get_user_info_display(self) -> str:
+        """
+        获取用户信息的显示文本
+
+        Returns:
+            str: 用户信息显示文本（如："管理员 | 工程师"）
+        """
+        if not self._user:
+            return "未登录"
+
+        username = self._user.get('username', 'Unknown')
+
+        # 获取角色显示名称
+        role_names = [r.get('display_name', r.get('name', '')) for r in self._roles]
+        role_str = " | ".join(role_names) if role_names else "无角色"
+
+        return f"{username}{role_str}"
 
 
 # 创建全局单例（使用模块级变量）
