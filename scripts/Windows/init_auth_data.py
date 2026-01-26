@@ -34,16 +34,16 @@ def init_permissions(db: Session):
         {"code": "role:delete", "name": "删除角色", "resource": "role", "action": "delete", "description": "删除角色"},
 
         # 项目管理权限
-        {"code": "project:create", "name": "创建项目", "resource": "project", "action": "create", "description": "创建项目"},
-        {"code": "project:read", "name": "查看项目", "resource": "project", "action": "read", "description": "查看项目"},
-        {"code": "project:update", "name": "更新项目", "resource": "project", "action": "update", "description": "更新项目"},
-        {"code": "project:delete", "name": "删除项目", "resource": "project", "action": "delete", "description": "删除项目"},
+        {"code": "projects:create", "name": "创建项目", "resource": "projects", "action": "create", "description": "创建项目"},
+        {"code": "projects:read", "name": "查看项目", "resource": "projects", "action": "read", "description": "查看项目"},
+        {"code": "projects:update", "name": "更新项目", "resource": "projects", "action": "update", "description": "更新项目"},
+        {"code": "projects:delete", "name": "删除项目", "resource": "projects", "action": "delete", "description": "删除项目"},
 
         # 资产管理权限
-        {"code": "asset:create", "name": "创建资产", "resource": "asset", "action": "create", "description": "创建资产"},
-        {"code": "asset:read", "name": "查看资产", "resource": "asset", "action": "read", "description": "查看资产"},
-        {"code": "asset:update", "name": "更新资产", "resource": "asset", "action": "update", "description": "更新资产"},
-        {"code": "asset:delete", "name": "删除资产", "resource": "asset", "action": "delete", "description": "删除资产"},
+        {"code": "assets:create", "name": "创建资产", "resource": "assets", "action": "create", "description": "创建资产"},
+        {"code": "assets:read", "name": "查看资产", "resource": "assets", "action": "read", "description": "查看资产"},
+        {"code": "assets:update", "name": "更新资产", "resource": "assets", "action": "update", "description": "更新资产"},
+        {"code": "assets:delete", "name": "删除资产", "resource": "assets", "action": "delete", "description": "删除资产"},
 
         # 系统管理权限
         {"code": "system:config", "name": "系统配置", "resource": "system", "action": "config", "description": "系统配置"},
