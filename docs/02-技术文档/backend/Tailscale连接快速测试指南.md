@@ -109,26 +109,70 @@ curl http://100.93.101.76:8000/
 
 ## 🔧 故障排查
 
+### ⚠️ 重要提示：Ping 不通是正常的！
+
+**现象**: `ping 100.93.101.76` 显示请求超时
+
+**原因**: Tailscale 默认阻止 ICMP（ping）流量，这是安全设计，不是故障。
+
+**正确做法**: 使用 HTTP 测试代替 ping
+```bash
+# 不要用 ping
+# ping 100.93.101.76  ❌ 超时
+
+# 改用 curl 测试
+curl http://100.93.101.76:8000/  ✅ 正常
+```
+
+详细说明: [Ping超时问题解决方案.md](Ping超时问题解决方案.md)
+
+---
+
 ### 问题 1: 无法 ping 通 Tailscale IP
 
-**症状**: `ping 100.93.101.76` 失败
+**症状**: `ping 100.93.101.76` 超时
+
+**说明**: ✅ 这是正常现象！Tailscale 阻止了 ICMP 流量
+
+**解决方案**: 使用 HTTP 测试
+```bash
+# 正确的测试方法
+curl http://100.93.101.76:8000/
+
+# 或使用客户端测试脚本
+python scripts\Windows\test_tailscale_client.py
+```
+
+---
+
+### 问题 2: HTTP 连接失败
+
+**症状**: `curl http://100.93.101.76:8000/` 失败
+
+**可能原因**:
+1. 后端服务未启动
+2. 后端未监听 0.0.0.0（只监听 127.0.0.1）
+3. 防火墙阻止连接
 
 **解决方案**:
 ```bash
 # 1. 检查 Tailscale 状态
 tailscale status
 
-# 2. 检查两台设备是否在同一网络
-tailscale status | grep "其他设备的主机名"
+# 2. 在后端服务器检查
+curl http://localhost:8000/
 
-# 3. 重启 Tailscale
-tailscale down
-tailscale up
+# 3. 检查监听地址
+netstat -an | find ":8000"
+# 应该看到: 0.0.0.0:8000 (不是 127.0.0.1:8000)
+
+# 4. 启动后端（使用 0.0.0.0）
+python -m uvicorn services.backend.app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-### 问题 2: 无法访问后端 API
+### 问题 3: Tailscale 服务未运行
 
 **症状**: `curl http://100.93.101.76:8000/` 超时
 
