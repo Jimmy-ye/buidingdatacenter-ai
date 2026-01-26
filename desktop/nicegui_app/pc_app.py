@@ -26,6 +26,7 @@ from desktop.nicegui_app.ui.login_page import show_login_page
 import os
 if os.getenv('ENVIRONMENT', 'development') == 'development':
     from desktop.nicegui_app.test_401_page import register_401_test_route
+    from desktop.nicegui_app.test_401_direct import register_direct_test_route
 
 BACKEND_BASE_URL = Config.get_api_base_url()
 SETTINGS = get_settings()
@@ -1307,7 +1308,10 @@ if __name__ in {"__main__", "__mp_main__"}:
     if os.getenv('ENVIRONMENT', 'development') == 'development':
         try:
             register_401_test_route()
-            print("[INFO] 401 测试页面已启用: http://localhost:8080/test-401")
+            register_direct_test_route()
+            print("[INFO] 401 测试页面已启用:")
+            print("       - http://localhost:8080/test-401 (场景测试)")
+            print("       - http://localhost:8080/test-401-direct (调试测试)")
         except Exception as e:
             print(f"[WARNING] 无法注册 401 测试页面: {e}")
 
