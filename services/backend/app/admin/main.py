@@ -17,7 +17,7 @@ class AdminApp:
         # 配置 NiceGUI
         ui.run(
             title="BDC-AI 账号管理",
-            port=8081,
+            port=8082,
             dark=None,
             binding_refresh_interval=0.5,
         )
