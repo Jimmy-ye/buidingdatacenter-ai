@@ -2,9 +2,10 @@
 BDC-AI 账号权限管理界面 - 主应用入口
 """
 
-from nicegui import ui, app
+from nicegui import ui
 from typing import Optional
-from services.api_client import api_client
+from services.backend.app.admin.services.api_client import api_client
+
 
 
 class AdminApp:
@@ -13,14 +14,6 @@ class AdminApp:
     def __init__(self):
         self.current_user: Optional[dict] = None
         self.is_logged_in = False
-
-        # 配置 NiceGUI
-        ui.run(
-            title="BDC-AI 账号管理",
-            port=8082,
-            dark=None,
-            binding_refresh_interval=0.5,
-        )
 
     def show_login_page(self):
         """显示登录页面"""
@@ -144,19 +137,16 @@ class AdminApp:
         self.show_admin_page()
 
         # 导入并注册子页面
-        from pages.users import show_users_page
-        from pages.roles import show_roles_page
-        from pages.permissions import show_permissions_page
-        from pages.audit import show_audit_page
+        from services.backend.app.admin.pages.users import show_users_page
+        from services.backend.app.admin.pages.roles import show_roles_page
+        from services.backend.app.admin.pages.permissions import show_permissions_page
+        from services.backend.app.admin.pages.audit import show_audit_page
 
         show_users_page()
         show_roles_page()
         show_permissions_page()
         show_audit_page()
 
-        return ui.run
 
-
-if __name__ == '__main__':
-    admin_app = AdminApp()
-    admin_app.run()
+# 创建应用实例
+admin_app = AdminApp()
