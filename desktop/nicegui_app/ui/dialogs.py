@@ -8,8 +8,10 @@
 """
 
 from typing import Any, Callable, Dict, Optional
+import inspect
 import httpx
 from nicegui import ui
+from desktop.nicegui_app.auth_manager import auth_manager
 
 
 # ==================== 项目对话框组件 ====================
@@ -35,6 +37,21 @@ class ProjectDialog:
         """
         self.backend_base_url = backend_base_url
         self.on_success = on_success
+
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """获取带有认证信息的请求头，用于项目创建/更新.
+
+        如果当前前端已登录且持有 token，则附加 Authorization: Bearer 头；
+        否则返回空字典，退化为匿名请求（通常会被后端拒绝）。
+        """
+        headers: Dict[str, str] = {}
+        try:
+            if auth_manager and auth_manager.token:
+                headers["Authorization"] = f"Bearer {auth_manager.token}"
+        except Exception:
+            # 认证不可用时退化为匿名请求
+            pass
+        return headers
 
     def show_create(self) -> None:
         """显示创建项目对话框"""
@@ -84,7 +101,8 @@ class ProjectDialog:
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         resp = await client.post(
                             f"{self.backend_base_url}/projects/",
-                            json=payload
+                            json=payload,
+                            headers=self._get_auth_headers() or None,
                         )
                         resp.raise_for_status()
                         data = resp.json()
@@ -178,7 +196,8 @@ class ProjectDialog:
                     async with httpx.AsyncClient(timeout=30.0) as client:
                         resp = await client.patch(
                             f"{self.backend_base_url}/projects/{project_id}",
-                            json=payload
+                            json=payload,
+                            headers=self._get_auth_headers() or None,
                         )
                         resp.raise_for_status()
                 except Exception as exc:  # noqa: BLE001

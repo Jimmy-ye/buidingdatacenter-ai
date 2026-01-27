@@ -52,7 +52,7 @@ def get_auth_manager():
     return _auth_manager_instance
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.9-permission-fix"
+UI_VERSION = "PC UI v0.3.10-permission-fix2"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -828,18 +828,28 @@ def main_page() -> None:
         current_tree_node_id = raw_id
 
         # 根据当前选中的节点类型，动态启用/禁用按钮
-        system_add_btn.disable()
-        zone_add_btn.disable()
-        device_add_btn.disable()
-        node_edit_btn.disable()
-        node_delete_btn.disable()
+        # 注意：这些按钮可能因为权限不足根本没有创建，此时为 None，需要判空
+        if system_add_btn:
+            system_add_btn.disable()
+        if zone_add_btn:
+            zone_add_btn.disable()
+        if device_add_btn:
+            device_add_btn.disable()
+        if node_edit_btn:
+            node_edit_btn.disable()
+        if node_delete_btn:
+            node_delete_btn.disable()
 
         if node_type == "building" and raw_id:
             # 楼栋节点：可以新增系统/区域、编辑/删除楼栋
-            system_add_btn.enable()
-            zone_add_btn.enable()
-            node_edit_btn.enable()
-            node_delete_btn.enable()
+            if system_add_btn:
+                system_add_btn.enable()
+            if zone_add_btn:
+                zone_add_btn.enable()
+            if node_edit_btn:
+                node_edit_btn.enable()
+            if node_delete_btn:
+                node_delete_btn.enable()
 
             # 切换到楼栋视角时清空资产列表
             all_assets_for_device.clear()
@@ -851,7 +861,8 @@ def main_page() -> None:
 
         if node_type == "system" and raw_id:
             # 系统节点：可以在其下创建设备
-            device_add_btn.enable()
+            if device_add_btn:
+                device_add_btn.enable()
             current_device_id = None
             try:
                 assets = await list_assets_for_system(raw_id)
@@ -1248,10 +1259,11 @@ def main_page() -> None:
         zone_add_btn.on_click(on_create_zone_click)
     if device_add_btn:
         device_add_btn.on_click(on_create_device_click)
+    # 楼栋编辑/删除按钮应绑定到 on_edit_node_click / on_delete_node_click，而不是不存在的 on_edit_building_click
     if node_edit_btn:
-        node_edit_btn.on_click(on_edit_building_click)
+        node_edit_btn.on_click(on_edit_node_click)
     if node_delete_btn:
-        node_delete_btn.on_click(on_delete_building_click)
+        node_delete_btn.on_click(on_delete_node_click)
     if upload_asset_button:
         upload_asset_button.on_click(on_upload_asset_click)
     if delete_asset_button:

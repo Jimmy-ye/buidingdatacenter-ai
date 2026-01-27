@@ -206,48 +206,7 @@ def route_image_asset(db: Session, asset_or_id) -> Asset:
 
     role = (asset.content_role or "").lower()
 
-    # 对仪表类图片：
-    # 1）先跑 OCR，得到结构化文本
-    # 2）同时也进入 LLM 管线，用于辅助识别读数
-    if role == "meter":
-        print(f"[DEBUG] Processing meter asset: {asset.id}, role={role}")
-        process_image_with_ocr(db, asset)
-
-        existing_count = (
-            db.query(AssetStructuredPayload)
-            .filter(AssetStructuredPayload.asset_id == asset.id)
-            .count()
-        )
-
-        payload: Dict[str, Any] = {
-            "route": "scene_llm_pipeline",
-            "reason": "meter image also scheduled for LLM meter-reading analysis",
-            "content_role": asset.content_role,
-        }
-
-        decision = AssetStructuredPayload(
-            asset_id=asset.id,
-            schema_type="image_route_decision_v1",
-            payload=payload,
-            version=float(existing_count + 1),
-            created_by="router",
-        )
-        db.add(decision)
-
-        print(f"[DEBUG] Setting asset status to pending_scene_llm")
-        asset.status = "pending_scene_llm"
-        db.commit()
-        db.refresh(asset)
-        print(f"[DEBUG] Asset status after commit: {asset.status}")
-        return asset
-
-    # 铭牌等仍然只跑 OCR，不进入 LLM
-    if role == "nameplate":
-        process_image_with_ocr(db, asset)
-        db.refresh(asset)
-        return asset
-
-    # 其他（如 scene_issue）：只做路由，进入场景 LLM 管线
+    # 统一路由：所有 image 按 content_role 进入 LLM 场景管线，由下游 worker 决定具体解析方式
     existing_count = (
         db.query(AssetStructuredPayload)
         .filter(AssetStructuredPayload.asset_id == asset.id)

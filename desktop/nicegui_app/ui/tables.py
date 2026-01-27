@@ -159,28 +159,50 @@ class AssetTableRowClickHandler:
 
     @staticmethod
     def extract_row_id(e: Any) -> Optional[str]:
-        """
-        从行点击事件中提取资产 ID
+        """从行点击事件中提取资产 ID。
 
-        Args:
-            e: 行点击事件参数
-
-        Returns:
-            资产 ID，如果无法提取则返回 None
+        兼容多种 NiceGUI/QTable rowClick 事件形态，例如：
+        - e.args == row
+        - e.args == [row]
+        - e.args == [mouse_event, row, row_index]
+        - e.args == {"row": row, ...}
         """
-        row = e.args
-        # 兼容 emit(row) 或 emit([row]) 两种情况
-        if isinstance(row, list):
-            if not row:
+        args = e.args
+        print(f"[DEBUG] asset_table rowClick raw args: {args!r}")
+
+        # 统一成候选列表，方便遍历查找真正的行对象
+        candidates: List[Any]
+        if isinstance(args, list):
+            if not args:
+                print("[DEBUG] asset_table rowClick: empty list args")
                 return None
-            row = row[0]
-        if not isinstance(row, dict):
+            candidates = list(args)
+        else:
+            candidates = [args]
+
+        row_obj: Optional[Dict[str, Any]] = None
+        asset_id: Optional[str] = None
+
+        for item in candidates:
+            # 直接就是行字典
+            if isinstance(item, dict) and "id" in item:
+                row_obj = item
+                asset_id = item.get("id")
+                break
+
+            # 包裹在 {"row": {...}} 里的行字典
+            if isinstance(item, dict) and "row" in item:
+                inner = item.get("row")
+                if isinstance(inner, dict) and "id" in inner:
+                    row_obj = inner
+                    asset_id = inner.get("id")
+                    break
+
+        if not row_obj or not asset_id:
+            print(f"[DEBUG] asset_table rowClick: no usable row with 'id' found in args {args!r}")
             return None
 
-        asset_id = row.get("id")
-        if not asset_id:
-            return None
-
+        print(f"[DEBUG] asset_table rowClick resolved asset_id={asset_id}")
         return str(asset_id)
 
 

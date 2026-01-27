@@ -318,3 +318,147 @@ UI_VERSION = "PC UI v0.3.9-system-primary"
 ```
 
 PC-UI 右上角会显示当前版本号，可用于快速验证修改是否生效（尤其是在远程部署或浏览器缓存场景下）。
+
+> 2026-01-27 更新：在本次修复后，版本号进一步提升为 `PC UI v0.3.10-permission-fix2`，用于明显区分“仅修到 0.3.9”与“包含资产点击/上传修复”的版本。
+
+---
+
+## 8. 资产表行点击与详情面板不联动问题（2026-01-27）
+
+### 8.1 问题现象
+
+- 使用 `yerui`（superadmin）登录远程 PC-UI，左侧工程树与资产列表可正常加载；
+- 点击资产表中的某一行时：
+  - 右侧“资产详情”面板完全无变化；
+  - 控制台没有后端请求日志，也没有明显报错；
+- 打印 `rowClick` 事件调试信息后，发现 `e.args` 结构为：
+
+```text
+e.args == [mouse_event_dict, row_dict, row_index]
+```
+
+而旧版事件处理只取了第一个元素（鼠标事件），导致完全拿不到资产 `id`。
+
+### 8.2 修复措施（ui/tables.py）
+
+在 `desktop/nicegui_app/ui/tables.py` 中扩展 `AssetTableRowClickHandler.extract_row_id` 的兼容性：
+
+- 支持多种 `rowClick` 事件形态：
+  - `e.args == row_dict`
+  - `e.args == [row_dict]`
+  - `e.args == [mouse_event, row_dict, row_index]`
+  - `e.args == {"row": row_dict, ...}`
+- 统一将 `e.args` 展开为候选列表 `candidates`，遍历寻找真正包含 `id` 的行对象：
+
+```python
+args = e.args
+print(f"[DEBUG] asset_table rowClick raw args: {args!r}")
+
+if isinstance(args, list):
+    if not args:
+        print("[DEBUG] asset_table rowClick: empty list args")
+        return None
+    candidates = list(args)
+else:
+    candidates = [args]
+
+row_obj = None
+asset_id = None
+
+for item in candidates:
+    if isinstance(item, dict) and "id" in item:
+        row_obj = item
+        asset_id = item.get("id")
+        break
+    if isinstance(item, dict) and "row" in item:
+        inner = item.get("row")
+        if isinstance(inner, dict) and "id" in inner:
+            row_obj = inner
+            asset_id = inner.get("id")
+            break
+
+if not row_obj or not asset_id:
+    print(f"[DEBUG] asset_table rowClick: no usable row with 'id' found in args {args!r}")
+    return None
+
+print(f"[DEBUG] asset_table rowClick resolved asset_id={asset_id}")
+return str(asset_id)
+```
+
+修复后：
+
+- `events/asset_events.on_asset_row_click` 能正确解析 `asset_id`；
+- 会调用后端 `/assets/{id}` 获取详情，并刷新右侧详情面板与预览图片。
+
+---
+
+## 9. 上传图片资产对话框的 inspect NameError 修复（2026-01-27）
+
+### 9.1 问题现象
+
+在 PC-UI 中点击“上传图片资产”，选择图片后控制台输出：
+
+```text
+[DEBUG] on_file_upload: 使用 e.content 读取
+[DEBUG] on_file_upload 处理异常: name 'inspect' is not defined
+[DEBUG] handle_upload: 未找到已缓存的文件内容
+```
+
+导致前端认为“没有已上传的文件内容”，无法将图片真正提交到后端。
+
+### 9.2 修复措施（ui/dialogs.py）
+
+问题根因：
+
+- `desktop/nicegui_app/ui/dialogs.py` 中上传对话框的 `on_file_upload` 使用了 `inspect.iscoroutine` 判断 `read()` 返回值是否为协程；
+- 但文件顶部忘记导入 `inspect`，在实际执行时抛出 `NameError`。
+
+修复方法：
+
+- 在文件顶部补充导入：
+
+```python
+from typing import Any, Callable, Dict, Optional
+import inspect
+import httpx
+from nicegui import ui
+from desktop.nicegui_app.auth_manager import auth_manager
+```
+
+修复后：
+
+- `on_file_upload` 能正确读取 `e.content` / `e.file` / `e.files[0]` 中的字节流；
+- `selected_file["content"]` 被正确缓存，`handle_upload` 可以将文件与元数据提交到后端 `/assets/upload_image_with_note`；
+- 控制台日志会显示：
+
+```text
+[DEBUG] 已接收到上传文件: xxx.png, 大小=... bytes, type=image/png
+[DEBUG] 开始上传文件到后端: xxx.png, size=... bytes, type=image/png
+```
+
+---
+
+## 10. 版本与部署注意事项（防止旧代码覆盖修复版本）
+
+在本次远程联调中，曾出现如下情况：
+
+- 文档中记录的修复（结构树按钮判空、节点编辑事件绑定、AuthManager 权限修复等）已经在某一台环境完成；
+- 但服务器上的 `pc_app.py` / `auth_manager.py` 被旧版本文件覆盖，导致同一批问题再次出现。
+
+为避免类似情况，建议：
+
+1. 以 Git 仓库为唯一“真源”
+   - 所有修复完成后推送到远端仓库；
+   - 在其他服务器部署时一律使用 `git pull` 同步，而不是手工复制单个 `.py` 文件。
+
+2. 通过 UI 版本号快速校验
+   - 当前包含全部 PC-UI 修复（权限 + 资产点击 + 上传）的版本标记为：
+     
+     ```python
+     UI_VERSION = "PC UI v0.3.10-permission-fix2"
+     ```
+   - 远程浏览器右上角若显示旧版本（例如 `v0.3.9-*`），说明前端代码尚未升级或浏览器缓存未刷新。
+
+3. 避免本地修改覆盖远端修复
+   - 在服务器上直接编辑 `pc_app.py` 前，先确认本地与远端分支是否一致；
+   - 若需要临时调试，建议新建分支或在本地改完后再统一合并，而不是“复制旧文件上去”。

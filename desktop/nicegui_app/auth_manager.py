@@ -362,15 +362,29 @@ class AuthManager:
                 user_detail = response.json()
                 self._user_details = user_detail
 
-                # 提取角色和权限
+                # 同步 is_superuser 标志到简化的 self._user，确保 has_permission 中的超级管理员判断生效
+                if user_detail.get('is_superuser') is not None:
+                    if self._user is None:
+                        self._user = {}
+                    self._user['is_superuser'] = bool(user_detail.get('is_superuser'))
+
+                # 提取角色和权限（归一化为权限代码字符串列表）
                 self._roles = user_detail.get('roles', [])
                 self._permissions = []
 
-                # 从所有角色中收集权限
+                # 从所有角色中收集权限 code，避免把原始字典直接放进列表
                 for role in self._roles:
                     role_permissions = role.get('permissions', [])
-                    if isinstance(role_permissions, list):
-                        self._permissions.extend(role_permissions)
+                    if not isinstance(role_permissions, list):
+                        continue
+                    for perm in role_permissions:
+                        code = None
+                        if isinstance(perm, dict):
+                            code = perm.get('code') or perm.get('name')
+                        else:
+                            code = str(perm)
+                        if code and code not in self._permissions:
+                            self._permissions.append(code)
 
                 print(f"[INFO] 用户权限加载成功:")
                 print(f"  - 角色: {[r.get('name') for r in self._roles]}")
