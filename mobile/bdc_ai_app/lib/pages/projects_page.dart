@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/project.dart';
 import '../providers/project_provider.dart';
 import '../providers/app_provider.dart';
+import '../providers/auth_provider.dart';
 
 /// 项目列表页面（首页）
 class ProjectsPage extends StatefulWidget {
@@ -40,13 +41,84 @@ class _ProjectsPageState extends State<ProjectsPage> {
       appBar: AppBar(
         title: const Text('工程列表'),
         actions: [
-          /// 搜索按钮（P2 可选）
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // TODO: 实现搜索功能
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('搜索功能待实现')),
+          /// 用户信息菜单
+          Consumer<AuthProvider>(
+            builder: (context, auth, child) {
+              return PopupMenuButton<String>(
+                icon: Row(
+                  children: [
+                    const Icon(Icons.person),
+                    const SizedBox(width: 4),
+                    Text(
+                      auth.user?.displayName ?? '用户',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                  ],
+                ),
+                onSelected: (value) async {
+                  if (value == 'logout') {
+                    // 确认登出
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('确认登出'),
+                        content: const Text('确定要登出吗？'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(false),
+                            child: const Text('取消'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(true),
+                            child: const Text('确定'),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (confirmed == true && context.mounted) {
+                      await context.read<AuthProvider>().logout();
+                      // 登出后自动跳转到登录页
+                      if (context.mounted) {
+                        Navigator.of(context).pushReplacementNamed('/login');
+                      }
+                    }
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem<String>(
+                    value: 'info',
+                    enabled: false,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          auth.user?.displayName ?? '用户',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          auth.user?.roleNames.join(' | ') ?? '无角色',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem<String>(
+                    value: 'logout',
+                    child: Row(
+                      children: [
+                        Icon(Icons.logout, size: 20),
+                        SizedBox(width: 8),
+                        Text('登出'),
+                      ],
+                    ),
+                  ),
+                ],
               );
             },
           ),

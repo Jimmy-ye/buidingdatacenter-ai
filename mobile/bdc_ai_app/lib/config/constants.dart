@@ -1,7 +1,9 @@
+import 'app_config.dart' as app_config;
+
 /// 应用配置常量
 class AppConfig {
-  /// API 基础 URL
-  static const String baseUrl = 'http://localhost:8000';
+  /// API 基础 URL（从 app_config 读取）
+  static String get baseUrl => app_config.AppConfig.apiBaseUrl;
 
   /// API 超时时间（毫秒）
   static const int apiTimeout = 30000;
@@ -11,6 +13,20 @@ class AppConfig {
 
   /// 离线缓存时长（小时）
   static const int cacheDurationHours = 24;
+}
+
+/// 缓存键名常量
+class CacheKeys {
+  // 项目相关
+  static const String projectList = 'cache_project_list';
+  static const String projectListTimestamp = 'cache_project_list_timestamp';
+
+  // 工程结构树（按项目区分）
+  static const String structureTree = 'cache_structure_tree_'; // + projectId
+  static const String structureTreeTimestamp = 'cache_structure_tree_timestamp_'; // + projectId
+
+  // 离线模式标记
+  static const String offlineMode = 'offline_mode_enabled';
 }
 
 /// API 端点路径
@@ -38,4 +54,7 @@ class ApiEndpoints {
 
   /// 健康检查
   static const String health = '/api/v1/health/';
+
+  /// 创建设备
+  static String createDevice(String systemId) => '/api/v1/systems/$systemId/devices';
 }

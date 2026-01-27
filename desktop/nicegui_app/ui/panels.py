@@ -183,8 +183,15 @@ class AssetDetailHelper:
         """
         if not asset:
             ui_elements["inference_status_label"].text = ""
-            ui_elements["run_ocr_button"].disabled = True
-            ui_elements["run_llm_button"].disabled = True
+
+            run_ocr_button = ui_elements.get("run_ocr_button")
+            if run_ocr_button is not None:
+                run_ocr_button.disabled = True
+
+            run_llm_button = ui_elements.get("run_llm_button")
+            if run_llm_button is not None:
+                run_llm_button.disabled = True
+
             return
 
         status = str(asset.get("status") or "").lower()
@@ -210,8 +217,14 @@ class AssetDetailHelper:
 
         # 根据模态类型和角色启用/禁用按钮
         is_image = modality == "image"
-        ui_elements["run_ocr_button"].disabled = not is_image
-        ui_elements["run_llm_button"].disabled = not (is_image and role in {"scene_issue", "meter"})
+
+        run_ocr_button = ui_elements.get("run_ocr_button")
+        if run_ocr_button is not None:
+            run_ocr_button.disabled = not is_image
+
+        run_llm_button = ui_elements.get("run_llm_button")
+        if run_llm_button is not None:
+            run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter"})
 
     @staticmethod
     def update_detail_panel(
@@ -247,8 +260,15 @@ class AssetDetailHelper:
             ui_elements["preview_image"].source = ""
             ui_elements["preview_button"].disabled = True
             ui_elements["inference_status_label"].text = ""
-            ui_elements["run_ocr_button"].disabled = True
-            ui_elements["run_llm_button"].disabled = True
+
+            run_ocr_button = ui_elements.get("run_ocr_button")
+            if run_ocr_button is not None:
+                run_ocr_button.disabled = True
+
+            run_llm_button = ui_elements.get("run_llm_button")
+            if run_llm_button is not None:
+                run_llm_button.disabled = True
+
             ui_elements["ocr_objects_label"].text = ""
             ui_elements["ocr_text_label"].text = ""
             ui_elements["llm_summary_label"].text = ""

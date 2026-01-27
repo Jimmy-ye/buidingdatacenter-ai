@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../models/asset.dart';
 import '../services/asset_service.dart';
+import '../services/api_service.dart';
 
 /// 视图类型枚举
 enum AssetViewType {
@@ -134,6 +135,11 @@ class AssetProvider extends ChangeNotifier {
 
       debugPrint('成功加载 ${_assets.length} 个资产（共 $_totalCount 个）');
     } catch (e) {
+      if (e is ApiException && (e.statusCode == 401 || e.statusCode == 403)) {
+        // 认证失败交由全局认证逻辑处理，这里不再展示错误页
+        debugPrint('资产列表请求认证失败: $e');
+        return;
+      }
       _setError('加载资产列表失败: $e');
       debugPrint('错误: $e');
     } finally {
