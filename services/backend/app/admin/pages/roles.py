@@ -16,15 +16,30 @@ class RolesPage:
 
     def load_roles(self):
         """加载角色列表"""
-        print(f"[FRONTEND] Loading roles...")
-        self.roles_data = api_client.get_roles()
-        print(f"[FRONTEND] Loaded {len(self.roles_data)} roles")
-        print(f"[FRONTEND] First role data: {self.roles_data[0] if self.roles_data else 'No data'}")
-        self.refresh_table()
+        try:
+            print(f"[FRONTEND] Loading roles...")
+            self.roles_data = api_client.get_roles()
+            print(f"[FRONTEND] Loaded {len(self.roles_data)} roles, type={type(self.roles_data)}")
+            if self.roles_data:
+                print(f"[FRONTEND] First role data keys: {list(self.roles_data[0].keys())}")
+            else:
+                print("[FRONTEND] No role data returned")
+            self.refresh_table()
+        except Exception as e:
+            print(f"[FRONTEND ERROR] Failed to load roles: {e}")
+            import traceback
+            traceback.print_exc()
 
     def load_permissions(self):
         """加载权限列表"""
-        self.all_permissions = api_client.get_permissions()
+        try:
+            print("[FRONTEND] Loading permissions for roles page...")
+            self.all_permissions = api_client.get_permissions()
+            print(f"[FRONTEND] Loaded {len(self.all_permissions)} permissions")
+        except Exception as e:
+            print(f"[FRONTEND ERROR] Failed to load permissions: {e}")
+            import traceback
+            traceback.print_exc()
 
     def refresh_table(self):
         """刷新表格数据"""
@@ -34,15 +49,24 @@ class RolesPage:
 
     def format_roles_for_table(self) -> List[Dict[str, Any]]:
         """格式化角色数据用于表格显示"""
-        formatted = []
-        for role in self.roles_data:
-            formatted.append({
-                'id': role.get('id'),
-                'name': role.get('name'),  # 后端返回的是 name，不是 code
-                'display_name': role.get('display_name'),
-                'level': role.get('level'),
-                'description': role.get('description') or '-',
-            })
+        formatted: List[Dict[str, Any]] = []
+        try:
+            for role in self.roles_data:
+                row = {
+                    'id': role.get('id'),
+                    'name': role.get('name'),  # 后端返回的是 name，不是 code
+                    'display_name': role.get('display_name'),
+                    'level': role.get('level'),
+                    'description': role.get('description') or '-',
+                }
+                formatted.append(row)
+            print(f"[FRONTEND] format_roles_for_table produced {len(formatted)} rows")
+            if formatted:
+                print(f"[FRONTEND] First formatted role row: {formatted[0]}")
+        except Exception as e:
+            print(f"[FRONTEND ERROR] format_roles_for_table failed: {e}")
+            import traceback
+            traceback.print_exc()
         return formatted
 
     def show_create_role_dialog(self):
@@ -190,6 +214,7 @@ class RolesPage:
     def show_role_permissions(self, role: Dict[str, Any]):
         """显示角色权限详情"""
         # 调用详情端点获取完整信息（包括权限）
+        print(f"[FRONTEND] Loading role detail for permissions, role_id={role.get('id')}")
         role_detail = api_client.get_role(role.get('id'))
 
         if not role_detail or "error" in role_detail:

@@ -96,6 +96,7 @@ class AdminApp:
                 ui.label('导航菜单').classes('text-lg font-bold mb-4')
                 ui.button('📋 用户管理', on_click=lambda: ui.navigate.to('/admin/users')).classes('w-full justify-start').props('flat')
                 ui.button('👥 角色管理', on_click=lambda: ui.navigate.to('/admin/roles')).classes('w-full justify-start').props('flat')
+                ui.button('👤 账号综合管理', on_click=lambda: ui.navigate.to('/admin/auth')).classes('w-full justify-start').props('flat')
                 ui.button('🔐 权限查看', on_click=lambda: ui.navigate.to('/admin/permissions')).classes('w-full justify-start').props('flat')
                 ui.button('📝 审计日志', on_click=lambda: ui.navigate.to('/admin/audit')).classes('w-full justify-start').props('flat')
 
@@ -163,11 +164,13 @@ class AdminApp:
         from services.backend.app.admin.pages.roles import show_roles_page
         from services.backend.app.admin.pages.permissions import show_permissions_page
         from services.backend.app.admin.pages.audit import show_audit_page
+        from services.backend.app.admin.pages.auth_center import show_auth_center_page
 
         show_users_page()
         show_roles_page()
         show_permissions_page()
         show_audit_page()
+        show_auth_center_page()
 
 
 # 创建应用实例
