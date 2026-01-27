@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -77,5 +77,44 @@ class SceneIssueReportPayload(BaseModel):
     summary: str  # concise description of the observed issue or status
     suspected_causes: List[str] = []
     recommended_actions: List[str] = []
+    confidence: Optional[float] = None
+    tags: List[str] = []
+
+
+class NameplateField(BaseModel):
+    """Single field extracted from an equipment nameplate.
+
+    This is intended to be used inside NameplateTablePayload.fields and
+    stored under schema_type="nameplate_table_v1" in AssetStructuredPayload.
+    """
+
+    key: str
+    label: str
+    value: Optional[Union[str, float]] = None
+    unit: Optional[str] = None
+    confidence: Optional[float] = None
+
+
+class NameplateTablePayload(BaseModel):
+    """Structured payload for LLM-extracted nameplate table information.
+
+    Stored under schema_type="nameplate_table_v1" in AssetStructuredPayload.
+    """
+
+    equipment_type: Optional[str] = None
+    fields: List[NameplateField] = []
+
+
+class MeterReadingPayload(BaseModel):
+    """Structured payload for LLM-extracted meter reading information.
+
+    Stored under schema_type="meter_reading_v1" in AssetStructuredPayload.
+    """
+
+    pre_reading: Optional[float] = None
+    reading: Optional[float] = None
+    unit: Optional[str] = None
+    status: Optional[str] = None
+    summary: str
     confidence: Optional[float] = None
     tags: List[str] = []

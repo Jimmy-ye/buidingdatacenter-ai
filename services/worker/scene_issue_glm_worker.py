@@ -48,9 +48,9 @@ client = OpenAI(api_key=GLM_API_KEY, base_url=GLM_BASE_URL)
 # ================= 辅助函数 =================
 
 def get_pending_scene_assets() -> List[Dict[str, Any]]:
-    """从后端获取待 LLM 处理的图片资产列表（包括 scene_issue 和 meter）。"""
+    """从后端获取待 LLM 处理的图片资产列表（scene_issue / meter / nameplate）。"""
 
-    roles = ["scene_issue", "meter"]
+    roles = ["scene_issue", "meter", "nameplate"]
     collected: Dict[str, Dict[str, Any]] = {}
 
     for role in roles:
@@ -161,41 +161,118 @@ def build_scene_prompt(note: Optional[str]) -> str:
     return base
 
 
-def build_meter_prompt(note: Optional[str]) -> str:
-    """构造发送给 GLM-4V 的 Prompt，专门用于仪表读数识别。"""
+def build_meter_prompt(pre_reading: Optional[float], note: Optional[str]) -> str:
+    """构造发送给 GLM-4V 的 Prompt，用于仪表读数结构化识别（MeterReadingPayload）。"""
 
     base = """
 你是一名建筑设备仪表读数识别助手。
-你的任务是阅读图片中的仪表/表盘，并给出尽可能准确的数值读数。
+你的任务是阅读图片中的仪表/表盘，并给出尽可能准确、可解释的数值读数。
 
 重要要求：
 1. 优先识别表盘或数字仪表上的读数（例如温度、压力、流量、电表读数等）。
-2. 如果图片中有多个相关读数，可以都列出。
-3. 如果读数模糊、被遮挡或你不确定，请务必在结果中明确写出"读数不确定，需要人工确认"，不要胡乱猜测。
+2. 如果图片中有多个相关读数，可以都列出，但最终需要给出一个主要读数 reading。
+3. 如果读数模糊、被遮挡或你不确定，请务必在 summary 中明确写出"读数不确定，需要人工确认"，不要胡乱猜测。
 
-也就是说：识别读数，如不确定，人工确认。
-
-输出格式：严格按照下列 JSON 结构输出，不要包含任何多余文字或 markdown：
+请严格按照下列 JSON 结构输出，不要包含任何多余文字或 markdown：
 {
-  "title": "一句话的简短标题，例如'温度表读数约为 65℃'；如果无法识别读数则写'仪表读数不明确'",
-  "issue_category": "可写为 'meter_reading' 或留空",
-  "severity": "low | medium | high（默认可使用 low）",
-  "summary": "详细描述你识别到的仪表读数，以及是否需要人工确认。如果读数不确定，必须明确写出'读数不确定，需要人工确认'",
-  "suspected_causes": ["可留空或给出与读数相关的简单说明"],
-  "recommended_actions": ["如果读数不确定，至少包含一条'请人工核对该仪表读数'"],
-  "confidence": 0.0-1.0 之间的数字，读数不确定时应降低到 0.5-0.7,
-  "tags": ["可包含诸如'仪表','读数','meter' 等标签"]
+  "pre_reading": 65.0,
+  "reading": 64.8,
+  "unit": "℃",
+  "status": "confirmed_from_image",
+  "summary": "...",
+  "confidence": 0.85,
+  "tags": ["仪表", "温度"]
 }
+
+字段说明：
+- pre_reading: 工程师预读数（如果有），可以用来对比；如果没有可为 null。
+- reading: 你根据图片识别到的主要读数；如果图片不清晰无法可靠读数，可以与 pre_reading 相同，但必须在 summary 中说明"读数不确定，需要人工确认"。
+- unit: 单位（如 ℃, kW, m3/h），看不出时可以为 null。
+- status 取值建议：
+  - "confirmed_from_image": 图片清晰，可以给出可信的读数；如与预读数接近，可在 summary 中说明一致或接近。
+  - "fallback_to_pre_reading": 图片不清晰，无法给出可靠读数；此时 reading 应等于 pre_reading，summary 必须说明基于预读数，需人工确认。
+  - "inconsistent_require_manual": 图片读数与预读数明显不一致，建议人工复核。
+- summary: 用自然语言说明你如何判断该读数、是否需要人工确认，以及与预读数的关系。读数不确定时必须包含"读数不确定，需要人工确认"等提示。
+- confidence: 0.0-1.0 之间的数字，读数不确定或图像质量差时应降低到 0.5-0.7。
+- tags: 标签列表，例如 ["仪表", "读数", "meter"]。
 
 重要提示：
 - 严格输出 JSON 对象（最外层是 { ... }），不要输出 explain、注释或 markdown。
 """.strip()
+
+    if pre_reading is not None:
+        base += f"""
+
+工程师提供的预读数 pre_reading={pre_reading}。你可以参考该数值，但必须首先基于图片独立判断实际读数，如与图片不一致要在 summary 中说明并提示人工确认。
+"""
 
     if note:
         base += f"""
 
 工程师备注（仅供参考，以实际仪表为准）：{note}
 重要约束：summary 必须基于图片中的仪表读数独立撰写，不得逐字复制备注；如备注与图片不一致，一律以图片为准。
+"""
+    return base
+
+
+def build_nameplate_prompt(note: Optional[str]) -> str:
+    """构造发送给 GLM-4V 的 Prompt，用于铭牌信息抽取（改进版，强调完整性）。"""
+
+    base = """
+你是一名设备铭牌信息抽取助手。
+你的任务是从图片中的设备铭牌中尽可能完整地读取所有可见信息，并输出为结构化表格形式。
+
+请严格按照下列 JSON 结构输出，不要包含任何多余文字或 markdown：
+{
+  "equipment_type": "设备类型（如'冷水机组'、'水泵'、'风机'等，如不确定可留空）",
+  "fields": [
+    {"key": "model", "label": "型号", "value": "YCWE-1234", "unit": null, "confidence": 0.95},
+    {"key": "cooling_rated_capacity", "label": "制冷量", "value": 7032, "unit": "kW", "confidence": 0.9},
+    {"key": "power_kw", "label": "额定功率", "value": 1200, "unit": "kW", "confidence": 0.9},
+    {"key": "refrigerant", "label": "制冷剂", "value": "R134a", "unit": null, "confidence": 0.92},
+    {"key": "voltage_v", "label": "电压", "value": 380, "unit": "V", "confidence": 0.9},
+    {"key": "current_a", "label": "电流", "value": 45.5, "unit": "A", "confidence": 0.85},
+    {"key": "frequency_hz", "label": "频率", "value": 50, "unit": "Hz", "confidence": 0.9}
+  ]
+}
+
+字段说明：
+- key: 英文字段名，使用标准命名规范：
+  * model - 型号
+  * cooling_rated_capacity - 制冷量/冷量
+  * heating_rated_capacity - 制热量
+  * power_kw - 额定功率
+  * refrigerant - 制冷剂
+  * voltage_v - 电压
+  * current_a - 电流/运行电流
+  * starting_current_a - 启动电流
+  * frequency_hz - 频率
+  * flow_rate_m3h - 流量
+  * head_m - 扬程
+  * pressure_kpa - 压力
+  * rpm - 转速
+  * weight_kg - 重量
+  * noise_level_db - 噪音等级
+- label: 中文展示名（如"型号"、"制冷量"、"额定功率"等）
+- value: 数值或字符串；如果该字段在铭牌上看不清或不存在，可以省略此字段
+- unit: 单位（如 kW, V, A, Hz, ℃, m³/h, kPa, rpm, kg, dB），不适用时为 null
+- confidence: 0.0-1.0 之间的置信度，清晰明确的内容可给0.9-0.95，稍模糊的可给0.7-0.85
+
+重要要求：
+1. 尽可能完整地提取铭牌上所有可见的技术参数字段，不要遗漏
+2. 每个字段都要有独立的 key、label、value、unit 和 confidence
+3. 如果某个参数看不清，宁可省略该字段，也不要编造数值
+4. value 的类型要正确：数值应该是数字类型（如 7032），不是字符串
+5. 严格输出 JSON 对象（最外层是 { ... }），不要输出 explain、注释或 markdown
+6. 对于冷水机组，通常应该包含：型号、制冷量、额定功率、制冷剂、电压、电流、频率等
+7. 对于水泵/风机，通常应该包含：型号、流量、扬程/转速、功率、电压、电流等
+""".strip()
+
+    if note:
+        base += f"""
+
+工程师备注（仅供参考，以图片为准）：{note}
+重要约束：如备注与图片不一致，一律以图片为准。
 """
     return base
 
@@ -295,10 +372,38 @@ def post_scene_issue_report(asset_id: str, payload: Dict[str, Any]) -> bool:
         return False
 
 
+def post_nameplate_table(asset_id: str, payload: Dict[str, Any]) -> bool:
+    url = f"{BACKEND_BASE_URL}/api/v1/assets/{asset_id}/nameplate_table"
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        if resp.status_code in (200, 201):
+            print(f"[OK] Reported nameplate_table_v1 for asset {asset_id}")
+            return True
+        print(f"[WARN] Failed to post nameplate table for {asset_id}: HTTP {resp.status_code} {resp.text}")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] Exception while posting nameplate table for {asset_id}: {exc}")
+        return False
+
+
+def post_meter_reading(asset_id: str, payload: Dict[str, Any]) -> bool:
+    url = f"{BACKEND_BASE_URL}/api/v1/assets/{asset_id}/meter_reading"
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        if resp.status_code in (200, 201):
+            print(f"[OK] Reported meter_reading_v1 for asset {asset_id}")
+            return True
+        print(f"[WARN] Failed to post meter reading for {asset_id}: HTTP {resp.status_code} {resp.text}")
+        return False
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] Exception while posting meter reading for {asset_id}: {exc}")
+        return False
+
+
 # ================= 主循环 =================
 
 def process_once() -> None:
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking for pending scene_issue/meter assets...")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Checking for pending scene_issue/meter/nameplate assets...")
     assets = get_pending_scene_assets()
     if not assets:
         print("No pending assets found.")
@@ -322,13 +427,17 @@ def process_once() -> None:
             continue
 
         note = detail.get("description") or ""
+        meta = detail.get("location_meta") or {}
+        pre_reading = None
+        if isinstance(meta, dict):
+            pre_reading = meta.get("meter_pre_reading")
 
-        # 根据 content_role 选择不同的 Prompt：
-        # - scene_issue：场景问题分析
-        # - meter：仪表读数识别
+        # 根据 content_role 选择不同的 Prompt 和后端端点：
         role = (detail.get("content_role") or "").lower()
-        if role == "meter":
-            prompt = build_meter_prompt(note)
+        if role == "nameplate":
+            prompt = build_nameplate_prompt(note)
+        elif role == "meter":
+            prompt = build_meter_prompt(pre_reading, note)
         else:
             prompt = build_scene_prompt(note)
 
@@ -337,8 +446,13 @@ def process_once() -> None:
             print(f"[WARN] GLM returned empty/invalid result for asset {asset_id}")
             continue
 
-        payload = normalise_scene_payload(raw_result, note)
-        post_scene_issue_report(asset_id, payload)
+        if role == "nameplate":
+            post_nameplate_table(asset_id, raw_result)
+        elif role == "meter":
+            post_meter_reading(asset_id, raw_result)
+        else:
+            payload = normalise_scene_payload(raw_result, note)
+            post_scene_issue_report(asset_id, payload)
 
 
 def main() -> None:

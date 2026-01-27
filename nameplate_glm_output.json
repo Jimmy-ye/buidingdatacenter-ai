@@ -1,0 +1,19 @@
+{
+  "equipment_type": "冷水机组",
+  "fields": [
+    {
+      "key": "model",
+      "label": "型号",
+      "value": "YORK YKR2RZK45DGG/EE2",
+      "unit": null,
+      "confidence": 0.9
+    },
+    {
+      "key": "cooling_rated_capacity",
+      "label": "制冷量",
+      "value": 7032,
+      "unit": "kW",
+      "confidence": 0.9
+    }
+  ]
+}

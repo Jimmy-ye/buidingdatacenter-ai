@@ -11,7 +11,14 @@ from shared.config.settings import get_settings
 from shared.db.models_asset import Asset, AssetStructuredPayload, FileBlob
 from shared.db.models_project import Building, Zone, BuildingSystem, Device
 from shared.db.session import get_db
-from ...schemas.asset import AssetCreate, AssetRead, AssetDetailRead, SceneIssueReportPayload
+from ...schemas.asset import (
+    AssetCreate,
+    AssetRead,
+    AssetDetailRead,
+    SceneIssueReportPayload,
+    NameplateTablePayload,
+    MeterReadingPayload,
+)
 from ...services.image_pipeline import process_image_with_ocr, route_image_asset
 
 
@@ -349,6 +356,90 @@ async def create_scene_issue_report(
 
 
 @router.post(
+    "/{asset_id}/nameplate_table",
+    response_model=AssetDetailRead,
+    summary="Attach an LLM-extracted nameplate table payload to a nameplate image asset",
+)
+async def create_nameplate_table_payload(
+    asset_id: uuid.UUID = Path(..., description="Asset ID"),
+    payload: NameplateTablePayload = Body(..., description="LLM-generated nameplate table payload"),
+    db: Session = Depends(get_db),
+) -> AssetDetailRead:
+    asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    role = (asset.content_role or "").lower()
+    if asset.modality != "image" or role != "nameplate":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="nameplate_table is only valid for image assets with content_role='nameplate'",
+        )
+
+    existing_count = (
+        db.query(AssetStructuredPayload)
+        .filter(AssetStructuredPayload.asset_id == asset.id)
+        .count()
+    )
+
+    structured = AssetStructuredPayload(
+        asset_id=asset.id,
+        schema_type="nameplate_table_v1",
+        payload=payload.model_dump(),
+        version=float(existing_count + 1),
+        created_by="llm",
+    )
+    db.add(structured)
+
+    asset.status = "parsed_nameplate_llm"
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.post(
+    "/{asset_id}/meter_reading",
+    response_model=AssetDetailRead,
+    summary="Attach an LLM-extracted meter reading payload to a meter image asset",
+)
+async def create_meter_reading_payload(
+    asset_id: uuid.UUID = Path(..., description="Asset ID"),
+    payload: MeterReadingPayload = Body(..., description="LLM-generated meter reading payload"),
+    db: Session = Depends(get_db),
+) -> AssetDetailRead:
+    asset = db.query(Asset).filter(Asset.id == asset_id).one_or_none()
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+
+    role = (asset.content_role or "").lower()
+    if asset.modality != "image" or role != "meter":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="meter_reading is only valid for image assets with content_role='meter'",
+        )
+
+    existing_count = (
+        db.query(AssetStructuredPayload)
+        .filter(AssetStructuredPayload.asset_id == asset.id)
+        .count()
+    )
+
+    structured = AssetStructuredPayload(
+        asset_id=asset.id,
+        schema_type="meter_reading_v1",
+        payload=payload.model_dump(),
+        version=float(existing_count + 1),
+        created_by="llm",
+    )
+    db.add(structured)
+
+    asset.status = "parsed_meter_llm"
+    db.commit()
+    db.refresh(asset)
+    return asset
+
+
+@router.post(
     "/",
     response_model=AssetRead,
     status_code=status.HTTP_201_CREATED,
@@ -406,6 +497,10 @@ async def upload_image_with_note(
     device_id: Optional[str] = Query(default=None, description="Device UUID"),
     note: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
+    meter_pre_reading: Optional[float] = Query(
+        default=None,
+        description="Pre-reading value for meter images; only meaningful when content_role='meter'",
+    ),
     auto_route: bool = Query(False, description="If true, automatically route image after upload"),
     db: Session = Depends(get_db),
 ) -> AssetRead:
@@ -450,6 +545,11 @@ async def upload_image_with_note(
     db.add(file_blob)
     db.flush()
 
+    location_meta = None
+    # 仅在 content_role 为 meter 且提供了预读数时写入 location_meta，供 LLM worker 使用
+    if meter_pre_reading is not None and (content_role or "").lower() == "meter":
+        location_meta = {"meter_pre_reading": float(meter_pre_reading)}
+
     asset = Asset(
         project_id=project_id_uuid,
         building_id=hierarchy["building"].id if hierarchy["building"] is not None else None,
@@ -463,6 +563,7 @@ async def upload_image_with_note(
         description=note,
         file_id=file_blob.id,
         capture_time=datetime.utcnow(),
+        location_meta=location_meta,
     )
     db.add(asset)
     db.commit()
