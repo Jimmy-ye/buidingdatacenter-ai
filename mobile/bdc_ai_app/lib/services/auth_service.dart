@@ -249,6 +249,20 @@ class AuthService {
     _authStatusController.add(AuthStatus.unauthenticated);
   }
 
+  /// 标记 Token 已过期（例如业务 API 返回 401/403 时调用）
+  Future<void> markTokenExpired() async {
+    // 取消定时器
+    _tokenExpiryTimer?.cancel();
+    _tokenExpiryTimer = null;
+
+    // 清除存储的数据
+    await _clearAuthData();
+
+    // 清除当前用户并通知监听方 Token 过期
+    _currentUser = null;
+    _authStatusController.add(AuthStatus.tokenExpired);
+  }
+
   /// 清除认证数据
   Future<void> _clearAuthData() async {
     await _secureStorage.delete(key: 'access_token');

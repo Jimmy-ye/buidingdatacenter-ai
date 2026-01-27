@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/constants.dart';
+import 'auth_service.dart';
 
 /// API 基础服务
 class ApiService {
@@ -137,12 +138,18 @@ class ApiService {
   http.Response _handleResponse(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return response;
-    } else {
-      throw ApiException(
-        statusCode: response.statusCode,
-        message: _parseErrorMessage(response),
-      );
     }
+
+    // 认证失败（包括 Token 过期）时，触发全局登出逻辑
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      // 异步执行，不阻塞当前响应处理
+      AuthService().markTokenExpired();
+    }
+
+    throw ApiException(
+      statusCode: response.statusCode,
+      message: _parseErrorMessage(response),
+    );
   }
 
   /// 解析错误消息

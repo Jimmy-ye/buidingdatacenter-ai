@@ -15,6 +15,20 @@ class AppConfig {
   static const int cacheDurationHours = 24;
 }
 
+/// 缓存键名常量
+class CacheKeys {
+  // 项目相关
+  static const String projectList = 'cache_project_list';
+  static const String projectListTimestamp = 'cache_project_list_timestamp';
+
+  // 工程结构树（按项目区分）
+  static const String structureTree = 'cache_structure_tree_'; // + projectId
+  static const String structureTreeTimestamp = 'cache_structure_tree_timestamp_'; // + projectId
+
+  // 离线模式标记
+  static const String offlineMode = 'offline_mode_enabled';
+}
+
 /// API 端点路径
 class ApiEndpoints {
   /// 项目列表
