@@ -38,7 +38,8 @@ def show_auth_center_page():
                             ui.button(icon='refresh', on_click=users_page.load_users).props('flat').tooltip('刷新列表')
                             ui.button('➕ 创建用户', on_click=users_page.show_create_user_dialog).props('flat')
 
-                    ui.label(lambda: f'共 {len(users_page.users_data)} 个用户').classes('text-gray-600')
+                    # 注意：这里不要使用 ui.label(lambda: ...) 以免函数进入 JSON 序列化
+                    ui.label(f'共 {len(users_page.users_data)} 个用户').classes('text-gray-600')
 
                     with ui.card().classes('w-full'):
                         columns = [
@@ -70,7 +71,8 @@ def show_auth_center_page():
                             ui.button(icon='refresh', on_click=roles_page.load_roles).props('flat').tooltip('刷新列表')
                             ui.button('➕ 创建角色', on_click=roles_page.show_create_role_dialog).props('flat')
 
-                    ui.label(lambda: f'共 {len(roles_page.roles_data)} 个角色').classes('text-gray-600')
+                    # 同理，这里也使用一次性字符串而非 lambda
+                    ui.label(f'共 {len(roles_page.roles_data)} 个角色').classes('text-gray-600')
 
                     with ui.card().classes('w-full'):
                         columns = [
