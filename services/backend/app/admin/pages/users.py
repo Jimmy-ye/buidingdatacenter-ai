@@ -17,10 +17,13 @@ class UsersPage:
 
     def load_users(self):
         """加载用户列表"""
+        print(f"[FRONTEND] Loading users...")
         self.users_data = api_client.get_users(
             skip=self.current_page * self.page_size,
             limit=self.page_size
         )
+        print(f"[FRONTEND] Loaded {len(self.users_data)} users")
+        print(f"[FRONTEND] First user data: {self.users_data[0] if self.users_data else 'No data'}")
         self.refresh_table()
 
     def refresh_table(self):
@@ -34,7 +37,8 @@ class UsersPage:
         """格式化用户数据用于表格显示"""
         formatted = []
         for user in self.users_data:
-            roles_str = ', '.join([r.get('name', r.get('code', '?')) for r in user.get('roles', [])])
+            # 获取角色列表（使用 display_name 或 name）
+            roles_str = ', '.join([r.get('display_name') or r.get('name', '?') for r in user.get('roles', [])])
             formatted.append({
                 'id': user.get('id'),
                 'username': user.get('username'),
@@ -112,8 +116,8 @@ class UsersPage:
             email_input = ui.input('邮箱', value=user.get('email') or '').props('outlined')
             phone_input = ui.input('电话', value=user.get('phone') or '').props('outlined')
 
-            # 角色显示（简化版）
-            current_roles = ', '.join([r.get('name', r.get('code', '?')) for r in user.get('roles', [])])
+            # 角色显示（使用 display_name 或 name）
+            current_roles = ', '.join([r.get('display_name') or r.get('name', '?') for r in user.get('roles', [])])
             ui.label(f'当前角色: {current_roles or "无"}').classes('text-sm text-gray-600 mb-2')
 
             with ui.row():
@@ -195,66 +199,83 @@ def show_users_page():
 
     @ui.page('/admin/users')
     def page():
-        # 加载数据
-        users_page.load_users()
+        try:
+            print(f"[FRONTEND] /admin/users page called")
+            # 加载数据
+            users_page.load_users()
 
-        with ui.column().classes('w-full p-4 gap-4'):
-            # 标题和操作栏
-            with ui.row().classes('w-full justify-between items-center'):
-                ui.label('用户管理').classes('text-2xl font-bold')
+            with ui.column().classes('w-full p-4 gap-4'):
+                # 标题和操作栏
+                with ui.row().classes('w-full justify-between items-center'):
+                    ui.label('用户管理').classes('text-2xl font-bold')
 
-                with ui.row():
-                    ui.button(icon='refresh', on_click=users_page.load_users).props('flat').tooltip('刷新')
-                    ui.button('➕ 创建用户', on_click=users_page.show_create_user_dialog).props('flat')
+                    with ui.row():
+                        ui.button(icon='refresh', on_click=users_page.load_users).props('flat').tooltip('刷新')
+                        ui.button('➕ 创建用户', on_click=users_page.show_create_user_dialog).props('flat')
 
-            # 统计信息
-            ui.label(f'共 {len(users_page.users_data)} 个用户').classes('text-gray-600')
+                # 统计信息
+                ui.label(f'共 {len(users_page.users_data)} 个用户').classes('text-gray-600')
 
-            # 用户列表表格
-            with ui.card().classes('w-full'):
-                columns = [
-                    {'name': 'username', 'label': '用户名', 'field': 'username', 'align': 'left'},
-                    {'name': 'full_name', 'label': '姓名', 'field': 'full_name', 'align': 'left'},
-                    {'name': 'email', 'label': '邮箱', 'field': 'email', 'align': 'left'},
-                    {'name': 'roles', 'label': '角色', 'field': 'roles', 'align': 'left'},
-                    {'name': 'is_active', 'label': '状态', 'field': 'is_active', 'align': 'center'},
-                    {'name': 'created_at', 'label': '创建时间', 'field': 'created_at', 'align': 'center'},
-                    {'name': 'actions', 'label': '操作', 'field': 'actions', 'align': 'center'},
-                ]
+                # 用户列表表格
+                with ui.card().classes('w-full'):
+                    columns = [
+                        {'name': 'username', 'label': '用户名', 'field': 'username', 'align': 'left'},
+                        {'name': 'full_name', 'label': '姓名', 'field': 'full_name', 'align': 'left'},
+                        {'name': 'email', 'label': '邮箱', 'field': 'email', 'align': 'left'},
+                        {'name': 'roles', 'label': '角色', 'field': 'roles', 'align': 'left'},
+                        {'name': 'is_active', 'label': '状态', 'field': 'is_active', 'align': 'center'},
+                        {'name': 'created_at', 'label': '创建时间', 'field': 'created_at', 'align': 'center'},
+                        {'name': 'actions', 'label': '操作', 'field': 'actions', 'align': 'center'},
+                    ]
 
-                def render_table():
-                    rows = users_page.format_users_for_table()
+                    def render_table():
+                        try:
+                            print(f"[FRONTEND] Rendering table with {len(users_page.users_data)} users")
+                            rows = users_page.format_users_for_table()
+                            print(f"[FRONTEND] Formatted {len(rows)} rows for table")
 
-                    # 添加操作列
-                    for row in rows:
-                        user_id = row['id']
-                        user = next((u for u in users_page.users_data if u.get('id') == user_id), None)
+                            # 添加操作列
+                            for row in rows:
+                                user_id = row['id']
+                                user = next((u for u in users_page.users_data if u.get('id') == user_id), None)
 
-                        actions = []
-                        if user:
-                            actions.append({
-                                'icon': 'edit',
-                                'tooltip': '编辑',
-                                'onClick': lambda u=user: users_page.show_edit_user_dialog(u)
-                            })
-                            actions.append({
-                                'icon': 'lock_reset',
-                                'tooltip': '重置密码',
-                                'onClick': lambda u=user: users_page.show_reset_password_dialog(u)
-                            })
-                            actions.append({
-                                'icon': 'delete',
-                                'tooltip': '删除',
-                                'onClick': lambda u=user: users_page.show_delete_user_confirm(u)
-                            })
+                                actions = []
+                                if user:
+                                    actions.append({
+                                        'icon': 'edit',
+                                        'tooltip': '编辑',
+                                        'onClick': lambda u=user: users_page.show_edit_user_dialog(u)
+                                    })
+                                    actions.append({
+                                        'icon': 'lock_reset',
+                                        'tooltip': '重置密码',
+                                        'onClick': lambda u=user: users_page.show_reset_password_dialog(u)
+                                    })
+                                    actions.append({
+                                        'icon': 'delete',
+                                        'tooltip': '删除',
+                                        'onClick': lambda u=user: users_page.show_delete_user_confirm(u)
+                                    })
 
-                        row['actions'] = actions
+                                row['actions'] = actions
 
-                    users_page.table = ui.table(
-                        columns=columns,
-                        rows=rows,
-                        row_key='id',
-                        pagination=20
-                    ).classes('w-full')
+                            users_page.table = ui.table(
+                                columns=columns,
+                                rows=rows,
+                                row_key='id',
+                                pagination=20
+                            ).classes('w-full')
+                            print(f"[FRONTEND] Table created successfully")
+                        except Exception as e:
+                            print(f"[FRONTEND ERROR] Table rendering failed: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            ui.label(f'表格渲染错误: {str(e)}').classes('text-red-600')
 
-                render_table()
+                    render_table()
+
+        except Exception as e:
+            print(f"[FRONTEND ERROR] Page rendering failed: {e}")
+            import traceback
+            traceback.print_exc()
+            ui.label(f'页面加载错误: {str(e)}').classes('text-red-600')

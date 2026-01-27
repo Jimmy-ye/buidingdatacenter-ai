@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
 from shared.db.session import get_db
-from shared.db.models_auth import User, Role, Permission, UserRole, RolePermission
+from shared.db.models_auth import User, Role, Permission, UserRole, RolePermission, AuditLog
 from shared.security.dependencies import get_current_user, get_current_superuser
 from shared.config.settings import get_settings
 
@@ -113,18 +113,21 @@ def get_current_user_info(
     db: Session = Depends(get_db)
 ):
     """获取当前登录用户的详细信息"""
+    print(f"[DEBUG] /me called for user: {current_user.username}")
+
     # 查询用户的角色
     user_roles = db.query(Role).join(
         UserRole
     ).filter(
         UserRole.user_id == current_user.id
     ).all()
+    print(f"[DEBUG] Found {len(user_roles)} roles")
 
     # 查询用户的所有权限
     if current_user.is_superuser:
         # 超级用户：获取所有权限
         user_permissions = db.query(Permission).order_by(Permission.resource, Permission.action).all()
-        print(f"DEBUG: Superuser {current_user.username}, permissions count: {len(user_permissions)}")
+        print(f"[DEBUG] Superuser {current_user.username}, permissions count: {len(user_permissions)}")
     else:
         # 普通用户：查询角色的权限
         user_permissions = db.query(Permission).join(
@@ -136,30 +139,30 @@ def get_current_user_info(
         ).filter(
             UserRole.user_id == current_user.id
         ).distinct().order_by(Permission.resource, Permission.action).all()
-        print(f"DEBUG: User {current_user.username}, permissions count: {len(user_permissions)}")
+        print(f"[DEBUG] User {current_user.username}, permissions count: {len(user_permissions)}")
 
-    # 构建响应
+    # 构建响应 - 确保所有值都是可序列化的基本类型
     user_dict = {
-        "id": current_user.id,
+        "id": str(current_user.id),
         "username": current_user.username,
         "email": current_user.email,
         "full_name": current_user.full_name,
         "phone": current_user.phone,
-        "is_active": current_user.is_active,
-        "is_superuser": current_user.is_superuser,
-        "created_at": current_user.created_at,
-        "last_login_at": current_user.last_login_at,
+        "is_active": bool(current_user.is_active),
+        "is_superuser": bool(current_user.is_superuser),
+        "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+        "last_login_at": current_user.last_login_at.isoformat() if current_user.last_login_at else None,
         "roles": [
             {
-                "id": role.id,
+                "id": str(role.id),
                 "name": role.name,
                 "display_name": role.display_name,
-                "level": role.level,
+                "level": int(role.level),
                 "permissions": [
                     {
-                        "code": perm.code,
-                        "name": perm.name,
-                        "description": perm.description
+                        "code": str(perm.code),
+                        "name": str(perm.name),
+                        "description": str(perm.description) if perm.description else None
                     }
                     for perm in user_permissions
                 ]
@@ -168,6 +171,7 @@ def get_current_user_info(
         ]
     }
 
+    print(f"[DEBUG] Returning user_dict for {current_user.username}")
     return user_dict
 
 
@@ -213,7 +217,9 @@ def list_users(
     - **skip**: 跳过的记录数
     - **limit**: 返回的记录数
     """
+    print(f"[DEBUG] list_users called: skip={skip}, limit={limit}")
     users = db.query(User).offset(skip).limit(limit).all()
+    print(f"[DEBUG] Found {len(users)} users")
 
     result = []
     for user in users:
@@ -225,27 +231,28 @@ def list_users(
         ).all()
 
         user_dict = {
-            "id": user.id,
+            "id": str(user.id),
             "username": user.username,
             "email": user.email,
             "full_name": user.full_name,
             "phone": user.phone,
-            "is_active": user.is_active,
-            "is_superuser": user.is_superuser,
-            "created_at": user.created_at,
-            "last_login_at": user.last_login_at,
+            "is_active": bool(user.is_active),
+            "is_superuser": bool(user.is_superuser),
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
             "roles": [
                 {
-                    "id": role.id,
+                    "id": str(role.id),
                     "name": role.name,
                     "display_name": role.display_name,
-                    "level": role.level
+                    "level": int(role.level)
                 }
                 for role in user_roles
             ]
         }
         result.append(user_dict)
 
+    print(f"[DEBUG] Returning {len(result)} users")
     return result
 
 
@@ -271,21 +278,21 @@ def get_user(
     ).all()
 
     return {
-        "id": user.id,
+        "id": str(user.id),
         "username": user.username,
         "email": user.email,
         "full_name": user.full_name,
         "phone": user.phone,
-        "is_active": user.is_active,
-        "is_superuser": user.is_superuser,
-        "created_at": user.created_at,
-        "last_login_at": user.last_login_at,
+        "is_active": bool(user.is_active),
+        "is_superuser": bool(user.is_superuser),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "roles": [
             {
-                "id": role.id,
+                "id": str(role.id),
                 "name": role.name,
                 "display_name": role.display_name,
-                "level": role.level
+                "level": int(role.level)
             }
             for role in user_roles
         ]
@@ -394,8 +401,25 @@ def list_roles(
     db: Session = Depends(get_db)
 ):
     """获取所有角色（仅管理员）"""
+    print(f"[DEBUG] /roles called")
     roles = db.query(Role).order_by(Role.level.desc()).all()
-    return roles
+    print(f"[DEBUG] Found {len(roles)} roles")
+
+    # 手动转换为字典，避免序列化问题
+    result = []
+    for role in roles:
+        role_dict = {
+            "id": str(role.id),
+            "name": role.name,
+            "display_name": role.display_name,
+            "description": role.description,
+            "level": int(role.level),
+            "created_at": role.created_at.isoformat() if role.created_at else None
+        }
+        result.append(role_dict)
+
+    print(f"[DEBUG] Returning {len(result)} roles as dicts")
+    return result
 
 
 @router.get("/roles/{role_id}", response_model=RoleDetail, summary="获取角色详情")
@@ -420,13 +444,13 @@ def get_role(
     ).all()
 
     return {
-        "id": role.id,
+        "id": str(role.id),
         "name": role.name,
         "display_name": role.display_name,
         "description": role.description,
-        "level": role.level,
-        "created_at": role.created_at,
-        "permissions": [perm.code for perm in permissions]
+        "level": int(role.level),
+        "created_at": role.created_at.isoformat() if role.created_at else None,
+        "permissions": [str(perm.code) for perm in permissions]
     }
 
 
@@ -436,8 +460,26 @@ def list_permissions(
     db: Session = Depends(get_db)
 ):
     """获取所有权限（仅管理员）"""
+    print(f"[DEBUG] /permissions called")
     permissions = db.query(Permission).order_by(Permission.resource, Permission.action).all()
-    return permissions
+    print(f"[DEBUG] Found {len(permissions)} permissions")
+
+    # 手动转换为字典，避免序列化问题
+    result = []
+    for perm in permissions:
+        perm_dict = {
+            "id": str(perm.id),
+            "code": str(perm.code),
+            "name": str(perm.name),
+            "description": str(perm.description) if perm.description else None,
+            "resource": str(perm.resource),
+            "action": str(perm.action),
+            "created_at": perm.created_at.isoformat() if perm.created_at else None
+        }
+        result.append(perm_dict)
+
+    print(f"[DEBUG] Returning {len(result)} permissions as dicts")
+    return result
 
 
 # ===== 审计日志（管理员） =====
@@ -455,9 +497,11 @@ def list_audit_logs(
     - **skip**: 跳过的记录数
     - **limit**: 返回的记录数
     """
+    print(f"[DEBUG] /audit-logs called: skip={skip}, limit={limit}")
     logs = db.query(AuditLog).order_by(
         AuditLog.created_at.desc()
     ).offset(skip).limit(limit).all()
+    print(f"[DEBUG] Found {len(logs)} audit logs")
 
     # 添加用户名（方便查询）
     result = []
@@ -469,8 +513,8 @@ def list_audit_logs(
             username = None
 
         log_dict = {
-            "id": log.id,
-            "user_id": log.user_id,
+            "id": str(log.id),
+            "user_id": str(log.user_id) if log.user_id else None,
             "username": username,
             "action": log.action,
             "resource_type": log.resource_type,
@@ -478,8 +522,9 @@ def list_audit_logs(
             "details": log.details,
             "ip_address": log.ip_address,
             "user_agent": log.user_agent,
-            "created_at": log.created_at
+            "created_at": log.created_at.isoformat() if log.created_at else None
         }
         result.append(log_dict)
 
+    print(f"[DEBUG] Returning {len(result)} audit logs")
     return result

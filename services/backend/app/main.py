@@ -41,13 +41,26 @@ def on_startup() -> None:
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler to log unexpected errors with stack trace."""
+    import traceback
+
+    print(f"\n{'='*60}")
+    print(f"[SERVER ERROR] {exc.__class__.__name__}: {str(exc)}")
+    print(f"[SERVER ERROR] Method: {request.method}")
+    print(f"[SERVER ERROR] URL: {request.url}")
+    print(f"[SERVER ERROR] Client: {request.client}")
+    print(f"[SERVER ERROR] Traceback:")
+    traceback.print_exc()
+    print(f"{'='*60}\n")
+
     logger.exception("Unhandled error on %s %s", request.method, request.url)
+
     return JSONResponse(
         status_code=500,
         content={
             "detail": "Internal server error",
             "error_type": exc.__class__.__name__,
             "message": str(exc),
+            "path": str(request.url.path),
         },
     )
 

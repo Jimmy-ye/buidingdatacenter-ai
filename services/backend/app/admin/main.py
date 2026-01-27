@@ -2,9 +2,18 @@
 BDC-AI 账号权限管理界面 - 主应用入口
 """
 
+import sys
+from pathlib import Path
+
+# 添加项目根目录到 Python 路径
+# 从 services/backend/app/admin/main.py 向上4级到达项目根目录
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 from nicegui import ui
 from typing import Optional
 from services.backend.app.admin.services.api_client import api_client
+import traceback
 
 
 
@@ -14,6 +23,10 @@ class AdminApp:
     def __init__(self):
         self.current_user: Optional[dict] = None
         self.is_logged_in = False
+        # 统计标签引用
+        self.user_count_label = None
+        self.role_count_label = None
+        self.permission_count_label = None
 
     def show_login_page(self):
         """显示登录页面"""
@@ -25,12 +38,18 @@ class AdminApp:
                 username_input = ui.input('用户名', placeholder='请输入用户名')
                 username_input.props('outlined')
 
-                password_input = ui.input('密码', placeholder='请输入密码', password=True, password_toggle_button=True)
+                password_input = ui.input('密码', placeholder='请输入密码', password=True)
                 password_input.props('outlined')
 
                 async def handle_login():
                     username = username_input.value
                     password = password_input.value
+
+                    # 去除前后空格
+                    if username:
+                        username = username.strip()
+                    if password:
+                        password = password.strip()
 
                     if not username or not password:
                         ui.notify("请输入用户名和密码", type="warning")
@@ -101,26 +120,29 @@ class AdminApp:
                 # 加载统计数据
                 self.load_statistics()
 
-        def load_statistics(self):
-            """加载统计数据"""
-            users = api_client.get_users(limit=1)
-            roles = api_client.get_roles(limit=1)
-            permissions = api_client.get_permissions(limit=1)
+    def load_statistics(self):
+        """加载统计数据"""
+        if not self.user_count_label or not self.role_count_label or not self.permission_count_label:
+            return
 
-            if isinstance(users, dict):
-                self.user_count_label.text = str(users.get('total', len(users)))
-            elif isinstance(users, list):
-                self.user_count_label.text = str(len(users))
+        users = api_client.get_users(limit=1)
+        roles = api_client.get_roles(limit=1)
+        permissions = api_client.get_permissions(limit=1)
 
-            if isinstance(roles, dict):
-                self.role_count_label.text = str(roles.get('total', len(roles)))
-            elif isinstance(roles, list):
-                self.role_count_label.text = str(len(roles))
+        if isinstance(users, dict):
+            self.user_count_label.text = str(users.get('total', len(users)))
+        elif isinstance(users, list):
+            self.user_count_label.text = str(len(users))
 
-            if isinstance(permissions, dict):
-                self.permission_count_label.text = str(permissions.get('total', len(permissions)))
-            elif isinstance(permissions, list):
-                self.permission_count_label.text = str(len(permissions))
+        if isinstance(roles, dict):
+            self.role_count_label.text = str(roles.get('total', len(roles)))
+        elif isinstance(roles, list):
+            self.role_count_label.text = str(len(roles))
+
+        if isinstance(permissions, dict):
+            self.permission_count_label.text = str(permissions.get('total', len(permissions)))
+        elif isinstance(permissions, list):
+            self.permission_count_label.text = str(len(permissions))
 
     def handle_logout(self):
         """处理登出"""
@@ -150,3 +172,14 @@ class AdminApp:
 
 # 创建应用实例
 admin_app = AdminApp()
+
+# 注册所有页面
+admin_app.run()
+
+# 启动 NiceGUI（必须无条件调用）
+ui.run(
+    title="BDC-AI 账号管理",
+    port=8082,
+    dark=None,
+    binding_refresh_interval=0.5,
+)

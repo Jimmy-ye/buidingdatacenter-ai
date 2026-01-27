@@ -24,6 +24,10 @@ class APIClient:
 
     def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
         """处理响应，统一错误处理"""
+        print(f"\n[API RESPONSE] URL: {response.url}")
+        print(f"[API RESPONSE] Status: {response.status_code}")
+        print(f"[API RESPONSE] Content-Type: {response.headers.get('content-type', 'N/A')}")
+
         if response.status_code == 401:
             ui.notify("登录已过期，请重新登录", type="warning")
             return {"error": "unauthorized"}
@@ -32,12 +36,22 @@ class APIClient:
             try:
                 error_data = response.json()
                 message = error_data.get("detail", str(error_data))
+                print(f"[API ERROR] Detail: {message}")
+                print(f"[API ERROR] Full error: {error_data}")
             except:
                 message = response.text or f"HTTP {response.status_code}"
+                print(f"[API ERROR] Text: {message}")
             ui.notify(f"请求失败: {message}", type="negative")
             return {"error": message}
 
-        return response.json()
+        try:
+            data = response.json()
+            print(f"[API SUCCESS] Data keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+            return data
+        except Exception as e:
+            print(f"[API ERROR] JSON decode failed: {e}")
+            print(f"[API ERROR] Response text: {response.text[:500]}")
+            return {"error": f"Invalid JSON response: {str(e)}"}
 
     # ================= 认证 API =================
 
@@ -54,12 +68,16 @@ class APIClient:
                 data = response.json()
                 self.access_token = data["access_token"]
                 self.refresh_token = data["refresh_token"]
+                print(f"[LOGIN SUCCESS] User: {username}")
                 return True
             else:
+                print(f"[LOGIN FAILED] User: {username}, Status: {response.status_code}")
+                print(f"[LOGIN FAILED] Response: {response.text[:200]}")
                 ui.notify("登录失败，请检查用户名和密码", type="negative")
                 return False
 
         except Exception as e:
+            print(f"[LOGIN ERROR] Exception: {str(e)}")
             ui.notify(f"登录错误: {str(e)}", type="negative")
             return False
 
