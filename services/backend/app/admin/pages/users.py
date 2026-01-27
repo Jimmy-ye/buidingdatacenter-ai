@@ -233,39 +233,38 @@ def show_users_page():
                             print(f"[FRONTEND] Rendering table with {len(users_page.users_data)} users")
                             rows = users_page.format_users_for_table()
                             print(f"[FRONTEND] Formatted {len(rows)} rows for table")
-
-                            # 添加操作列
-                            for row in rows:
-                                user_id = row['id']
-                                user = next((u for u in users_page.users_data if u.get('id') == user_id), None)
-
-                                actions = []
-                                if user:
-                                    actions.append({
-                                        'icon': 'edit',
-                                        'tooltip': '编辑',
-                                        'onClick': lambda u=user: users_page.show_edit_user_dialog(u)
-                                    })
-                                    actions.append({
-                                        'icon': 'lock_reset',
-                                        'tooltip': '重置密码',
-                                        'onClick': lambda u=user: users_page.show_reset_password_dialog(u)
-                                    })
-                                    actions.append({
-                                        'icon': 'delete',
-                                        'tooltip': '删除',
-                                        'onClick': lambda u=user: users_page.show_delete_user_confirm(u)
-                                    })
-
-                                row['actions'] = actions
-
                             users_page.table = ui.table(
                                 columns=columns,
                                 rows=rows,
                                 row_key='id',
                                 pagination=20
                             ).classes('w-full')
-                            print(f"[FRONTEND] Table created successfully")
+
+                            @users_page.table.add_slot('body-cell-actions')
+                            def _(row):
+                                try:
+                                    user_id = row.get('id')
+                                    user = next((u for u in users_page.users_data if u.get('id') == user_id), None)
+                                    if not user:
+                                        return
+
+                                    with ui.row().classes('items-center justify-center gap-1'):
+                                        ui.button(
+                                            icon='edit',
+                                            on_click=lambda u=user: users_page.show_edit_user_dialog(u)
+                                        ).props('flat round dense').tooltip('编辑')
+                                        ui.button(
+                                            icon='lock_reset',
+                                            on_click=lambda u=user: users_page.show_reset_password_dialog(u)
+                                        ).props('flat round dense').tooltip('重置密码')
+                                        ui.button(
+                                            icon='delete',
+                                            on_click=lambda u=user: users_page.show_delete_user_confirm(u)
+                                        ).props('flat round dense color=red').tooltip('删除')
+                                except Exception as e:
+                                    print(f"[FRONTEND ERROR] actions cell render failed: {e}")
+
+                            print(f"[FRONTEND] Table created successfully with actions slot")
                         except Exception as e:
                             print(f"[FRONTEND ERROR] Table rendering failed: {e}")
                             import traceback

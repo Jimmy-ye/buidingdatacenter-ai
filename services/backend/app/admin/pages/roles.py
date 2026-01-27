@@ -257,33 +257,33 @@ def show_roles_page():
                             print(f"[FRONTEND] Rendering table with {len(roles_page.roles_data)} roles")
                             rows = roles_page.format_roles_for_table()
                             print(f"[FRONTEND] Formatted {len(rows)} rows for table")
-
-                            # 添加操作列
-                            for row in rows:
-                                role_id = row['id']
-                                role = next((r for r in roles_page.roles_data if r.get('id') == role_id), None)
-
-                                actions = []
-                                if role:
-                                    actions.append({
-                                        'icon': 'edit',
-                                        'tooltip': '编辑',
-                                        'onClick': lambda r=role: roles_page.show_edit_role_dialog(r)
-                                    })
-                                    actions.append({
-                                        'icon': 'delete',
-                                        'tooltip': '删除',
-                                        'onClick': lambda r=role: roles_page.show_delete_role_confirm(r)
-                                    })
-
-                                row['actions'] = actions
-
                             roles_page.table = ui.table(
                                 columns=columns,
                                 rows=rows,
                                 row_key='id'
                             ).classes('w-full')
-                            print(f"[FRONTEND] Table created successfully")
+
+                            @roles_page.table.add_slot('body-cell-actions')
+                            def _(row):
+                                try:
+                                    role_id = row.get('id')
+                                    role = next((r for r in roles_page.roles_data if r.get('id') == role_id), None)
+                                    if not role:
+                                        return
+
+                                    with ui.row().classes('items-center justify-center gap-1'):
+                                        ui.button(
+                                            icon='edit',
+                                            on_click=lambda r=role: roles_page.show_edit_role_dialog(r)
+                                        ).props('flat round dense').tooltip('编辑')
+                                        ui.button(
+                                            icon='delete',
+                                            on_click=lambda r=role: roles_page.show_delete_role_confirm(r)
+                                        ).props('flat round dense color=red').tooltip('删除')
+                                except Exception as e:
+                                    print(f"[FRONTEND ERROR] role actions cell render failed: {e}")
+
+                            print(f"[FRONTEND] Table created successfully with actions slot")
                         except Exception as e:
                             print(f"[FRONTEND ERROR] Table rendering failed: {e}")
                             import traceback
