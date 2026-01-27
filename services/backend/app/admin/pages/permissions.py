@@ -4,7 +4,7 @@
 
 from nicegui import ui
 from typing import Dict, Any, List
-from services.api_client import api_client
+from services.backend.app.admin.services.api_client import api_client
 
 
 class PermissionsPage:
