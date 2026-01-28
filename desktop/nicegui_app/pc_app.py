@@ -52,7 +52,7 @@ def get_auth_manager():
     return _auth_manager_instance
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.10-permission-fix2"
+UI_VERSION = "PC UI v0.3.13-zone-label"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -295,12 +295,51 @@ def build_tree_nodes(tree: Dict[str, Any]) -> List[Dict[str, Any]]:
         # 为了在 on_select 回调中简单区分类型，这里将 type 编码进 id 字符串
         tree_id = f"{node_type}:{raw_id}" if node_type and raw_id else str(raw_id or "")
 
-        children = [convert(child) for child in node.get("children", [])]
+        # 默认子节点
+        children_nodes: List[Dict[str, Any]] = []
+        raw_children = node.get("children", []) or []
+
+        # 对楼栋节点，将系统和区域拆成两个分支显示，其余子节点保持原状
+        if node_type == "building" and raw_children:
+            system_children_raw = [c for c in raw_children if c.get("type") == "system"]
+            zone_children_raw = [c for c in raw_children if c.get("type") == "zone"]
+            other_children_raw = [
+                c for c in raw_children
+                if c not in system_children_raw and c not in zone_children_raw
+            ]
+
+            if system_children_raw:
+                system_children = [convert(c) for c in system_children_raw]
+                children_nodes.append(
+                    {
+                        "id": f"system_group:{raw_id}",
+                        "label": "系统",
+                        "icon": "folder",
+                        "children": system_children,
+                    }
+                )
+
+            if zone_children_raw:
+                zone_children = [convert(c) for c in zone_children_raw]
+                children_nodes.append(
+                    {
+                        "id": f"zone_group:{raw_id}",
+                        "label": "区域",
+                        "icon": "folder",
+                        "children": zone_children,
+                    }
+                )
+
+            for child in other_children_raw:
+                children_nodes.append(convert(child))
+        else:
+            children_nodes = [convert(child) for child in raw_children]
+
         return {
             "id": tree_id,
             "label": label,
             "icon": icon,
-            "children": children,
+            "children": children_nodes,
         }
 
     root = tree.get("tree") or tree
@@ -339,45 +378,36 @@ def main_page() -> None:
 
             tree_search = ui.input(placeholder="搜索结构名称...").props("dense clearable").classes("q-mt-sm")
 
-            with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
-                # 根据权限控制结构创建按钮
-                building_add_btn = None
-                system_add_btn = None
-                zone_add_btn = None
-                device_add_btn = None
+            # 结构节点管理：新增 / 编辑 / 删除（折叠区）
+            building_add_btn = None
+            system_add_btn = None
+            zone_add_btn = None
+            device_add_btn = None
+            node_edit_btn = None
+            node_delete_btn = None
+            system_delete_btn = None
+            device_delete_btn = None
 
-                if auth_mgr.has_permission('structures:create'):
-                    building_add_btn = ui.button("＋楼栋").props("dense outlined")
-                if auth_mgr.has_permission('structures:create'):
-                    system_add_btn = ui.button("＋系统").props("dense outlined")
-                if auth_mgr.has_permission('structures:create'):
-                    zone_add_btn = ui.button("＋区域").props("dense outlined")
-                if auth_mgr.has_permission('structures:create'):
-                    device_add_btn = ui.button("＋设备").props("dense outlined")
+            with ui.expansion("结构节点管理").classes("q-mt-sm"):
+                with ui.column().classes("q-gutter-xs"):
+                    ui.label("新增节点").classes("text-caption text-grey")
+                    with ui.row().classes("items-center q-gutter-xs"):
+                        if auth_mgr.has_permission('structures:create'):
+                            building_add_btn = ui.button("＋楼栋").props("dense outlined")
+                            system_add_btn = ui.button("＋系统").props("dense outlined")
+                            zone_add_btn = ui.button("＋区域").props("dense outlined")
+                            device_add_btn = ui.button("＋设备").props("dense outlined")
 
-            with ui.row().classes("items-center q-mt-sm q-gutter-xs"):
-                # 根据权限控制结构编辑/删除按钮
-                node_edit_btn = None
-                node_delete_btn = None
+                    ui.label("编辑 / 删除").classes("text-caption text-grey q-mt-xs")
+                    with ui.row().classes("items-center q-gutter-xs"):
+                        if auth_mgr.has_permission('structures:update'):
+                            node_edit_btn = ui.button("编辑楼栋", color="primary").props("dense outlined")
+                        if auth_mgr.has_permission('structures:delete'):
+                            node_delete_btn = ui.button("删除楼栋", color="negative").props("dense outlined")
+                            system_delete_btn = ui.button("删除系统", color="negative").props("dense outlined")
+                            device_delete_btn = ui.button("删除设备", color="negative").props("dense outlined")
 
-                if auth_mgr.has_permission('structures:update'):
-                    node_edit_btn = ui.button("编辑楼栋", color="primary").props("dense outlined")
-                if auth_mgr.has_permission('structures:delete'):
-                    node_delete_btn = ui.button("删除楼栋", color="negative").props("dense outlined")
-
-            tree_widget = ui.tree([]).props("node-key=id")
-
-            # 初始时禁用依赖树节点类型的按钮，避免误操作
-            if system_add_btn:
-                system_add_btn.disable()
-            if zone_add_btn:
-                zone_add_btn.disable()
-            if device_add_btn:
-                device_add_btn.disable()
-            if node_edit_btn:
-                node_edit_btn.disable()
-            if node_delete_btn:
-                node_delete_btn.disable()
+            tree_widget = ui.tree([]).props("node-key=id selected-color=primary")
 
         # 右侧：顶部项目信息 + 资产列表 / 详情两列布局
         with ui.column().style("flex-grow: 1; height: 100%; overflow: auto;"):
@@ -447,6 +477,11 @@ def main_page() -> None:
                                 label="时间",
                             ).props("dense outlined")
 
+                        # 区域分区模糊搜索（基于 location_meta.zone_label）
+                        zone_search_input = ui.input(
+                            placeholder="按区域分区模糊搜索",
+                        ).props("dense clearable").classes("q-mt-xs")
+
                         result_count_label = ui.label("").classes("text-caption text-grey q-mt-xs")
                         table_columns = get_asset_table_columns()
 
@@ -484,29 +519,27 @@ def main_page() -> None:
                                     "width: 100%; max-width: 550px; height: 350px; min-width: 200px; background: #f5f5f5; border-radius: 4px;"
                                 )
                                 preview_image.visible = False
-                            with ui.row().classes("q-mt-sm q-gutter-sm"):
-                                preview_button = ui.button("预览图片")
-                                open_file_button = ui.button("打开原始文件")
 
-                            # 大图预览对话框
+                            # 大图预览对话框（目前仅用于自动预览，不提供单独按钮）
                             preview_dialog = ui.dialog()
                             with preview_dialog, ui.card():
                                 dialog_image = ui.image().props("loading=eager").style(
                                     "max-width: 80vw; max-height: 80vh; object-fit: contain;"
                                 )
 
+                            # 为向后兼容，保留 preview_button 变量但不创建实际按钮
+                            preview_button = None
+
                         with ui.card().classes("w-full q-mt-sm").style("overflow: auto; max-height: 500px;"):
-                            ui.label("OCR/LLM 识别结果").classes("text-subtitle2 q-mb-sm")
+                            ui.label("AI 识别结果").classes("text-subtitle2 q-mb-sm")
                             inference_status_label = ui.label("").classes("text-caption text-grey q-mb-xs")
                             with ui.row().classes("q-mb-sm q-gutter-sm"):
-                                # 根据权限控制OCR/LLM按钮
+                                # 根据权限控制 AI 按钮
                                 run_ocr_button = None
                                 run_llm_button = None
 
-                                if auth_mgr.has_permission('ocr:run'):
-                                    run_ocr_button = ui.button("运行 OCR")
                                 if auth_mgr.has_permission('llm:run'):
-                                    run_llm_button = ui.button("生成现场问题报告")
+                                    run_llm_button = ui.button("运行 AI 识别")
                             ocr_objects_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
                             ocr_text_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
                             llm_summary_label = ui.label("").classes("text-body2").style("white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word;")
@@ -594,7 +627,7 @@ def main_page() -> None:
             inference_status_label.text = ""
             if run_ocr_button:
                 run_ocr_button.disabled = True
-            if run_llm_button:
+            if run_llm_button is not None:
                 run_llm_button.disabled = True
             return
 
@@ -604,7 +637,7 @@ def main_page() -> None:
 
         msg = ""
         if not status:
-            msg = "未解析，点击下方按钮运行 OCR 或提交 LLM 分析"
+            msg = "未解析，点击下方按钮提交 AI 识别"
         elif status == "parsed_ocr_ok":
             msg = "OCR 完成（置信度较高）"
         elif status == "parsed_ocr_low_conf":
@@ -621,7 +654,7 @@ def main_page() -> None:
         is_image = modality == "image"
         if run_ocr_button:
             run_ocr_button.disabled = not is_image
-        if run_llm_button:
+        if run_llm_button is not None:
             run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter"})
 
     def get_current_project() -> Optional[Dict[str, Any]]:
@@ -758,6 +791,17 @@ def main_page() -> None:
             time_filter=time_filter.value or "all",
         )
 
+        # 基于区域分区标签（location_meta.zone_label）的模糊搜索
+        zone_query = (zone_search_input.value or "").strip().lower()
+        if zone_query:
+            def _get_zone_label(a: Dict[str, Any]) -> str:
+                meta = a.get("location_meta") or {}
+                if isinstance(meta, dict):
+                    return str(meta.get("zone_label") or "")
+                return ""
+
+            filtered = [a for a in filtered if zone_query in _get_zone_label(a).lower()]
+
         asset_table.rows = filtered
         asset_table.update()
         result_count_label.text = f"共 {len(filtered)} 条"
@@ -839,6 +883,10 @@ def main_page() -> None:
             node_edit_btn.disable()
         if node_delete_btn:
             node_delete_btn.disable()
+        if system_delete_btn:
+            system_delete_btn.disable()
+        if device_delete_btn:
+            device_delete_btn.disable()
 
         if node_type == "building" and raw_id:
             # 楼栋节点：可以新增系统/区域、编辑/删除楼栋
@@ -863,6 +911,8 @@ def main_page() -> None:
             # 系统节点：可以在其下创建设备
             if device_add_btn:
                 device_add_btn.enable()
+            if system_delete_btn:
+                system_delete_btn.enable()
             current_device_id = None
             try:
                 assets = await list_assets_for_system(raw_id)
@@ -954,6 +1004,24 @@ def main_page() -> None:
             # 同步 state_ref 到旧变量（向后兼容）
             selected_asset = asset_state_ref.selected_asset
 
+            # 选中资产后，高亮结构树中对应的设备或系统节点（仅视觉高亮，不触发 on_select_tree）
+            try:
+                sa = selected_asset or {}
+                device_id_for_asset = sa.get("device_id")
+                system_id_for_asset = sa.get("system_id")
+                target_node_id = None
+                if device_id_for_asset:
+                    target_node_id = f"device:{device_id_for_asset}"
+                elif system_id_for_asset:
+                    target_node_id = f"system:{system_id_for_asset}"
+
+                if target_node_id:
+                    tree_widget._props["selected"] = [target_node_id]
+                    tree_widget.update()
+            except Exception:
+                # 高亮失败不影响资产详情使用
+                pass
+
         return handler
 
     asset_table.on(
@@ -967,6 +1035,7 @@ def main_page() -> None:
     modality_filter.on_value_change(lambda _: apply_asset_filters())
     role_filter.on_value_change(lambda _: apply_asset_filters())
     time_filter.on_value_change(lambda _: apply_asset_filters())
+    zone_search_input.on_value_change(lambda _: apply_asset_filters())
 
     project_select.on_value_change(reload_tree)
 
@@ -1216,6 +1285,53 @@ def main_page() -> None:
             on_success=reload_tree,
         )
 
+    async def on_delete_system_click() -> None:
+        """删除系统点击事件（直接调用后端 /systems/{system_id}）。"""
+        if current_tree_node_type != "system" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择要删除的系统节点", color="warning", position="top")
+            return
+
+        system_id = current_tree_node_id
+
+        try:
+            # 添加认证头
+            headers = {}
+            if get_auth_manager().is_authenticated():
+                headers["Authorization"] = f"Bearer {get_auth_manager().token}"
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.delete(f"{BACKEND_BASE_URL}/systems/{system_id}", headers=headers or None)
+                resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            ui.notify(f"删除系统失败: {exc}", color="negative")
+            return
+
+        ui.notify("系统已删除", color="positive")
+        await reload_tree()
+
+    async def on_delete_device_click() -> None:
+        """删除设备点击事件（直接调用后端 /devices/{device_id}）。"""
+        if current_tree_node_type != "device" or not current_tree_node_id:
+            ui.notify("请先在左侧树中选择要删除的设备节点", color="warning", position="top")
+            return
+
+        device_id_local = current_tree_node_id
+
+        try:
+            headers = {}
+            if get_auth_manager().is_authenticated():
+                headers["Authorization"] = f"Bearer {get_auth_manager().token}"
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.delete(f"{BACKEND_BASE_URL}/devices/{device_id_local}", headers=headers or None)
+                resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            ui.notify(f"删除设备失败: {exc}", color="negative")
+            return
+
+        ui.notify("设备已删除", color="positive")
+        await reload_tree()
+
     async def on_edit_node_click() -> None:
         """编辑楼栋点击事件（使用新的对话框组件）"""
         if current_tree_node_type != "building" or not current_tree_node_id:
@@ -1264,6 +1380,10 @@ def main_page() -> None:
         node_edit_btn.on_click(on_edit_node_click)
     if node_delete_btn:
         node_delete_btn.on_click(on_delete_node_click)
+    if system_delete_btn:
+        system_delete_btn.on_click(on_delete_system_click)
+    if device_delete_btn:
+        device_delete_btn.on_click(on_delete_device_click)
     if upload_asset_button:
         upload_asset_button.on_click(on_upload_asset_click)
     if delete_asset_button:
@@ -1282,6 +1402,10 @@ def main_page() -> None:
         node_edit_btn.disable()
     if node_delete_btn:
         node_delete_btn.disable()
+    if system_delete_btn:
+        system_delete_btn.disable()
+    if device_delete_btn:
+        device_delete_btn.disable()
 
     async def on_preview_click() -> None:
         """在右侧详情卡片中预览图片，统一使用后端下载端点。
@@ -1355,8 +1479,9 @@ def main_page() -> None:
         except Exception as exc:  # noqa: BLE001
             ui.notify(f"打开文件失败: {exc}", color="negative")
 
-    preview_button.on_click(on_preview_click)
-    open_file_button.on_click(on_open_file_click)
+    # 预览图片改为自动触发，不再提供手动按钮；仅在有按钮时才绑定
+    if preview_button is not None:
+        preview_button.on_click(on_preview_click)
 
     async def load_initial_data() -> None:
         await reload_projects_and_tree(None)

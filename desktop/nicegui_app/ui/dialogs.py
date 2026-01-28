@@ -943,6 +943,8 @@ class AssetDialog:
             meter_location_input = ui.input(label="仪表位置（可选，例如楼层/机房/回路号）").style("max-width: 320px;")
             meter_pre_reading_input.visible = False
             meter_location_input.visible = False
+            # 区域分区标签：纯文本，不与工程结构强绑定
+            zone_label_input = ui.input(label="区域分区（可选，例如：A机房-一层-冷冻水）").style("max-width: 320px;")
             note_input = ui.input(label="备注").props("type=textarea")
             title_input = ui.input(label="标题（可选，默认使用文件名）")
 
@@ -1074,6 +1076,10 @@ class AssetDialog:
                         location_val = (meter_location_input.value or "").strip()
                         if location_val:
                             params["meter_location"] = location_val
+                # 区域分区标签：始终允许填写
+                zone_label_val = (zone_label_input.value or "").strip()
+                if zone_label_val:
+                    params["zone_label"] = zone_label_val
                 if auto_route_checkbox.value:
                     params["auto_route"] = "true"
 

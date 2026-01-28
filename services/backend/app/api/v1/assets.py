@@ -505,6 +505,10 @@ async def upload_image_with_note(
         default=None,
         description="Location description for meter images; only meaningful when content_role='meter'",
     ),
+    zone_label: Optional[str] = Query(
+        default=None,
+        description="Human-readable zone label for this asset; used only for filtering/search and display",
+    ),
     auto_route: bool = Query(False, description="If true, automatically route image after upload"),
     db: Session = Depends(get_db),
 ) -> AssetRead:
@@ -549,16 +553,22 @@ async def upload_image_with_note(
     db.add(file_blob)
     db.flush()
 
-    location_meta = None
-    # 仅在 content_role 为 meter 时写入与仪表相关的元数据，供 LLM worker 和前端使用
+    location_meta: Optional[dict] = None
+    meta: dict = {}
+
+    # 仪表专用元数据，供 LLM worker 和前端使用
     if (content_role or "").lower() == "meter":
-        meta: dict = {}
         if meter_pre_reading is not None:
             meta["meter_pre_reading"] = float(meter_pre_reading)
         if meter_location:
             meta["meter_location"] = meter_location
-        if meta:
-            location_meta = meta
+
+    # 区域分区标签，仅作为过滤/展示用的文本属性
+    if zone_label:
+        meta["zone_label"] = zone_label
+
+    if meta:
+        location_meta = meta
 
     asset = Asset(
         project_id=project_id_uuid,

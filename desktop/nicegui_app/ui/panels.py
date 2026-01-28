@@ -149,23 +149,116 @@ class AssetDetailHelper:
 
             # 现场问题 LLM 分析结果
             if schema == "scene_issue_report_v1":
-                # 显示问题标题
+                parts = []
+
                 issue_title = data.get("title", "")
                 if issue_title:
-                    llm_text = f"【问题】{issue_title}\n"
+                    parts.append(f"【问题】{issue_title}")
 
-                # 显示问题摘要
                 summary = data.get("summary", "")
                 if summary:
                     if len(summary) > 300:
                         summary = summary[:300] + "..."
-                    llm_text = llm_text + f"\n【摘要】{summary}"
+                    parts.append(f"【摘要】{summary}")
 
-                # 显示推荐措施
                 actions = data.get("recommended_actions") or []
                 if actions:
                     action_text = "\n".join([f"• {a}" for a in actions[:3]])
-                    llm_text = llm_text + f"\n【建议】\n{action_text}"
+                    parts.append(f"【建议】\n{action_text}")
+
+                if parts:
+                    block = "\n".join(parts)
+                    if llm_text:
+                        llm_text += "\n\n" + block
+                    else:
+                        llm_text = block
+
+            # 铭牌表格解析结果
+            if schema == "nameplate_table_v1":
+                lines = ["【铭牌信息】"]
+
+                equipment_type = data.get("equipment_type")
+                if equipment_type:
+                    lines.append(f"设备类型: {equipment_type}")
+
+                fields = data.get("fields") or []
+                if fields:
+                    lines.append("关键参数:")
+                    for field in fields[:8]:
+                        label = field.get("label") or field.get("key") or ""
+                        value = field.get("value")
+                        unit = field.get("unit")
+                        confidence = field.get("confidence")
+
+                        value_str = "" if value is None else str(value)
+                        if unit:
+                            value_str = f"{value_str} {unit}".strip()
+
+                        if confidence is not None:
+                            try:
+                                conf_str = f" (置信度: {float(confidence):.0%})"
+                            except Exception:
+                                conf_str = ""
+                        else:
+                            conf_str = ""
+
+                        if label or value_str:
+                            lines.append(f"• {label}: {value_str}{conf_str}")
+
+                if len(lines) > 1:
+                    block = "\n".join(lines)
+                    if llm_text:
+                        llm_text += "\n\n" + block
+                    else:
+                        llm_text = block
+
+            # 仪表读数解析结果
+            if schema == "meter_reading_v1":
+                lines = ["【仪表读数】"]
+
+                reading = data.get("reading")
+                unit = data.get("unit") or ""
+                pre_reading = data.get("pre_reading")
+                status = data.get("status") or ""
+                summary = data.get("summary") or ""
+                confidence = data.get("confidence")
+
+                if reading is not None:
+                    try:
+                        reading_val = float(reading)
+                        reading_str = f"{reading_val:g}{unit}".strip()
+                    except Exception:
+                        reading_str = f"{reading}{unit}".strip()
+                    lines.append(f"当前读数: {reading_str}")
+
+                if pre_reading is not None:
+                    try:
+                        pre_val = float(pre_reading)
+                        pre_str = f"{pre_val:g}{unit}".strip()
+                    except Exception:
+                        pre_str = f"{pre_reading}{unit}".strip()
+                    lines.append(f"预读数: {pre_str}")
+
+                if status:
+                    lines.append(f"状态: {status}")
+
+                if summary:
+                    if len(summary) > 300:
+                        summary = summary[:300] + "..."
+                    lines.append(f"说明: {summary}")
+
+                if confidence is not None:
+                    try:
+                        lines.append(f"置信度: {float(confidence):.0%}")
+                    except Exception:
+                        pass
+
+                if len(lines) > 1:
+                    block = "\n".join(lines)
+                    if llm_text:
+                        llm_text += "\n\n" + block
+                    else:
+                        llm_text = block
 
         return llm_text
 
@@ -210,6 +303,10 @@ class AssetDetailHelper:
             msg = "已提交到 LLM 管线，等待分析结果……"
         elif status == "parsed_scene_llm":
             msg = "LLM 场景分析已完成"
+        elif status == "parsed_nameplate_llm":
+            msg = "铭牌信息解析已完成"
+        elif status == "parsed_meter_llm":
+            msg = "仪表读数解析已完成"
         else:
             msg = f"当前状态: {status}"
 
@@ -224,7 +321,7 @@ class AssetDetailHelper:
 
         run_llm_button = ui_elements.get("run_llm_button")
         if run_llm_button is not None:
-            run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter"})
+            run_llm_button.disabled = not (is_image and role in {"scene_issue", "meter", "nameplate"})
 
     @staticmethod
     def update_detail_panel(
