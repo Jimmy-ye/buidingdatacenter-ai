@@ -46,22 +46,66 @@ class Asset {
         ? '${AppConfig.baseUrl}/api/v1/assets/$id/download'
         : null;
 
-    // 解析 LLM 结果摘要（仅在详情接口中有 structured_payloads 时可用）
+    // 解析 AI 结果摘要（仅在详情接口中有 structured_payloads 时可用）
     String? llmSummary;
     final payloads = json['structured_payloads'] as List<dynamic>?;
-    if (payloads != null) {
+    if (payloads != null && payloads.isNotEmpty) {
+      Map<String, Map<String, dynamic>> latestBySchema = {};
+
       for (final sp in payloads) {
         if (sp is! Map<String, dynamic>) continue;
         final schema = sp['schema_type']?.toString();
+        if (schema == null || schema.isEmpty) continue;
+
+        double version = 0;
+        try {
+          final v = sp['version'];
+          if (v != null) {
+            version = double.tryParse(v.toString()) ?? 0;
+          }
+        } catch (_) {
+          version = 0;
+        }
+
+        final existing = latestBySchema[schema];
+        if (existing == null) {
+          latestBySchema[schema] = Map<String, dynamic>.from(sp);
+        } else {
+          double existingVersion = 0;
+          try {
+            final v = existing['version'];
+            if (v != null) {
+              existingVersion = double.tryParse(v.toString()) ?? 0;
+            }
+          } catch (_) {
+            existingVersion = 0;
+          }
+          if (version >= existingVersion) {
+            latestBySchema[schema] = Map<String, dynamic>.from(sp);
+          }
+        }
+      }
+
+      final buffer = StringBuffer();
+
+      // 按固定顺序渲染：场景问题 → 铭牌 → 仪表
+      for (final schema in [
+        'scene_issue_report_v1',
+        'nameplate_table_v1',
+        'meter_reading_v1',
+      ]) {
+        final sp = latestBySchema[schema];
+        if (sp == null) continue;
+        final payload = sp['payload'] as Map<String, dynamic>? ?? {};
+
+        // 现场问题解析结果
         if (schema == 'scene_issue_report_v1') {
-          final payload = sp['payload'] as Map<String, dynamic>? ?? {};
           final title = payload['title']?.toString();
           final summary = payload['summary']?.toString();
           final actions = (payload['recommended_actions'] as List<dynamic>?)
               ?.map((e) => e.toString())
               .toList();
 
-          final buffer = StringBuffer();
           if (title != null && title.isNotEmpty) {
             buffer.writeln('【问题】$title');
           }
@@ -73,14 +117,72 @@ class Asset {
             for (final a in actions.take(3)) {
               buffer.writeln('- $a');
             }
+            buffer.writeln();
+          }
+        }
+
+        // 铭牌表格解析结果（nameplate_table_v1）
+        if (schema == 'nameplate_table_v1') {
+          final equipmentType = payload['equipment_type']?.toString();
+          final fields = payload['fields'] as List<dynamic>?;
+
+          if (equipmentType != null && equipmentType.isNotEmpty) {
+            buffer.writeln('【铭牌】设备类型：$equipmentType');
+          } else {
+            buffer.writeln('【铭牌】');
           }
 
-          final text = buffer.toString().trim();
-          if (text.isNotEmpty) {
-            llmSummary = text;
+          if (fields != null && fields.isNotEmpty) {
+            final displayFields = fields.take(6);
+            for (final f in displayFields) {
+              if (f is! Map<String, dynamic>) continue;
+              final label = (f['label'] ?? f['key'])?.toString();
+              final value = f['value'];
+              final unit = f['unit']?.toString();
+
+              if (label == null || label.isEmpty) continue;
+
+              var valueStr = value?.toString() ?? '';
+              if (unit != null && unit.isNotEmpty) {
+                valueStr = valueStr.isEmpty ? unit : '$valueStr $unit';
+              }
+              if (valueStr.isEmpty) continue;
+
+              buffer.writeln('- $label: $valueStr');
+            }
+            buffer.writeln();
           }
-          break;
         }
+
+        // 仪表读数解析结果（meter_reading_v1）
+        if (schema == 'meter_reading_v1') {
+          final reading = payload['reading'];
+          final preReading = payload['pre_reading'];
+          final unit = payload['unit']?.toString() ?? '';
+          final status = payload['status']?.toString();
+          final summary = payload['summary']?.toString();
+
+          buffer.writeln('【仪表读数】');
+
+          if (reading != null) {
+            buffer.writeln('当前读数: ${reading.toString()}$unit');
+          }
+          if (preReading != null) {
+            buffer.writeln('预读数: ${preReading.toString()}$unit');
+          }
+          if (status != null && status.isNotEmpty) {
+            buffer.writeln('状态: $status');
+          }
+          if (summary != null && summary.isNotEmpty) {
+            buffer.writeln('说明: $summary');
+          }
+          buffer.writeln();
+        }
+      }
+
+      final text = buffer.toString().trim();
+      if (text.isNotEmpty) {
+        llmSummary = text;
       }
     }
 

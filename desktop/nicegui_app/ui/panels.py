@@ -143,9 +143,40 @@ class AssetDetailHelper:
         payloads = asset.get("structured_payloads") or []
         llm_text = ""
 
+        if not payloads:
+            return llm_text
+
+        # 为避免同一 schema 多次识别时出现重复块，这里按 schema_type 折叠，
+        # 仅保留每种 schema 的最新版本（根据 version 字段判断）。
+        latest_by_schema: Dict[str, Any] = {}
         for sp in payloads:
+            if not isinstance(sp, dict):
+                continue
             schema = sp.get("schema_type", "")
-            data = sp.get("payload", {})
+            if not schema:
+                continue
+            try:
+                version = float(sp.get("version", 0) or 0)
+            except Exception:
+                version = 0.0
+
+            existing = latest_by_schema.get(schema)
+            if existing is None:
+                latest_by_schema[schema] = sp
+            else:
+                try:
+                    existing_version = float(existing.get("version", 0) or 0)
+                except Exception:
+                    existing_version = 0.0
+                if version >= existing_version:
+                    latest_by_schema[schema] = sp
+
+        # 按固定顺序渲染：场景问题 → 铭牌 → 仪表
+        for schema in ["scene_issue_report_v1", "nameplate_table_v1", "meter_reading_v1"]:
+            sp = latest_by_schema.get(schema)
+            if not sp:
+                continue
+            data = sp.get("payload", {}) or {}
 
             # 现场问题 LLM 分析结果
             if schema == "scene_issue_report_v1":

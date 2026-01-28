@@ -696,7 +696,7 @@ class _AssetsPageState extends State<AssetsPage> {
                                   ],
                                 ),
                               ),
-                            // LLM 结果摘要
+                            // AI 解析结果摘要
                             if (detail.llmSummary != null &&
                                 detail.llmSummary!.isNotEmpty)
                               Padding(
@@ -708,7 +708,7 @@ class _AssetsPageState extends State<AssetsPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const Text(
-                                      'LLM 结果',
+                                      'AI 解析',
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.bold,
@@ -880,29 +880,60 @@ class _AssetsPageState extends State<AssetsPage> {
           /// 空列表状态
           if (provider.isEmpty) {
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.photo_library_outlined,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '暂无照片',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Colors.grey,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.photo_library_outlined,
+                      size: 64,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '暂无照片',
+                      style:
+                          Theme.of(context).textTheme.titleLarge?.copyWith(
+                                color: Colors.grey,
+                              ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '点击右上角相机图标或下方按钮上传照片',
+                      textAlign: TextAlign.center,
+                      style:
+                          Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                    ),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 64,
+                      child: ElevatedButton.icon(
+                        onPressed: _pickAndUploadImage,
+                        icon: const Icon(Icons.camera_alt, size: 28),
+                        label: const Text(
+                          '拍照上传',
+                          style: TextStyle(fontSize: 18),
                         ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '点击右上角相机图标上传照片',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[600],
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24, vertical: 16),
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                          elevation: 4,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                  ),
-                ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           }
