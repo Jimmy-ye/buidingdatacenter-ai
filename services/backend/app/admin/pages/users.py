@@ -107,7 +107,7 @@ class UsersPage:
                 label='角色',
                 with_input=True,
                 multiple=True,
-            ).props('outlined use-chips')
+            ).props('outlined use-chips emit-value map-options option-label=label option-value=value')
 
             with ui.row():
                 ui.button('取消', on_click=dialog.close).props('flat')
