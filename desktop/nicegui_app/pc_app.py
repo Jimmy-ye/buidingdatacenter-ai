@@ -52,7 +52,7 @@ def get_auth_manager():
     return _auth_manager_instance
 
 # 简单的前端版本号标记，便于确认是否加载了最新的 PC UI 代码
-UI_VERSION = "PC UI v0.3.13-zone-label"
+UI_VERSION = "PC UI v0.3.14-zone-schemeB"
 
 # ==================== 新增：API 客户端（重构阶段 1）====================
 # 创建统一的 API 客户端实例
@@ -395,7 +395,7 @@ def main_page() -> None:
                         if auth_mgr.has_permission('structures:create'):
                             building_add_btn = ui.button("＋楼栋").props("dense outlined")
                             system_add_btn = ui.button("＋系统").props("dense outlined")
-                            zone_add_btn = ui.button("＋区域").props("dense outlined")
+                            # 方案 B：暂不提供前端创建区域的入口，zone_add_btn 保持为 None（只读查看区域树）
                             device_add_btn = ui.button("＋设备").props("dense outlined")
 
                     ui.label("编辑 / 删除").classes("text-caption text-grey q-mt-xs")
