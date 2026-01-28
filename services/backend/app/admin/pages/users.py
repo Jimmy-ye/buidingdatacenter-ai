@@ -16,6 +16,8 @@ class UsersPage:
         self.page_size = 20
         # 缓存角色列表用于创建/编辑用户时选择
         self.all_roles: List[Dict[str, Any]] = []
+        # 角色下拉：label -> code 的映射，避免前端显示 [object Object]
+        self.role_label_to_code: Dict[str, str] = {}
 
     def load_roles(self):
         """加载角色列表（用于下拉选择）"""
@@ -93,24 +95,27 @@ class UsersPage:
             password_input = ui.input('密码*', placeholder='请输入密码', password=True, password_toggle_button=True).props('outlined')
             phone_input = ui.input('电话', placeholder='请输入电话').props('outlined')
 
-            # 角色选择：从后端拉取角色列表，多选下拉（value 优先使用 code，兼容 name）
-            role_options = [
-                {
-                    'label': f"{r.get('display_name') or r.get('name')} ({r.get('code') or r.get('name')})",
-                    'value': r.get('code') or r.get('name'),
-                }
-                for r in self.all_roles
-            ]
-            print(f"[FRONTEND] Role options for user form: {[o['value'] for o in role_options]}")
+            # 角色选择：从后端拉取角色列表，多选下拉
+            # 为避免 NiceGUI/Quasar 显示 [object Object]，这里直接使用字符串选项，
+            # 通过 role_label_to_code 映射回角色代码
+            self.role_label_to_code = {}
+            role_options: List[str] = []
+            for r in self.all_roles:
+                code = r.get('code') or r.get('name')
+                display = r.get('display_name') or r.get('name') or code or '?'
+                if not code:
+                    continue
+                label = f"{display} ({code})"
+                self.role_label_to_code[label] = code
+                role_options.append(label)
+
+            print(f"[FRONTEND] Role options for user form (labels): {role_options}")
             role_select = ui.select(
                 options=role_options,
                 label='角色',
                 with_input=True,
                 multiple=True,
-                # NiceGUI 3.x: 明确指定用于显示和取值的字段
-                option_label='label',
-                option_value='value',
-            ).props('outlined use-chips emit-value map-options')
+            ).props('outlined use-chips')
 
             with ui.row():
                 ui.button('取消', on_click=dialog.close).props('flat')
@@ -133,14 +138,15 @@ class UsersPage:
             ui.notify("用户名和密码不能为空", type="warning")
             return
 
-        # 解析角色（多选下拉返回 list 或单值）
+        # 解析角色（多选下拉返回 list 或单值），从 label 映射回后端需要的角色代码
+        mapping = getattr(self, 'role_label_to_code', {}) or {}
         if isinstance(role_values, list):
-            role_codes = [v for v in role_values if v]
+            role_codes = [mapping.get(v, v) for v in role_values if v]
         elif role_values:
-            role_codes = [role_values]
+            role_codes = [mapping.get(role_values, role_values)]
         else:
             role_codes = []
-        print(f"[FRONTEND] Creating user with roles: {role_codes}")
+        print(f"[FRONTEND] Creating user with roles (labels={role_values}) -> codes={role_codes}")
 
         user_data = {
             "username": username,
