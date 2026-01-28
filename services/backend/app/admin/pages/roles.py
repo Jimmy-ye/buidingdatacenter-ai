@@ -288,27 +288,60 @@ def show_roles_page():
                                 row_key='id'
                             ).classes('w-full')
 
-                            @roles_page.table.add_slot('body-cell-actions')
-                            def _(row):
-                                try:
-                                    role_id = row.get('id')
-                                    role = next((r for r in roles_page.roles_data if r.get('id') == role_id), None)
-                                    if not role:
-                                        return
+                            # 使用模板 slot + 自定义事件渲染操作列，兼容 NiceGUI 3.x
+                            roles_page.table.add_slot('body-cell-actions', r'''
+                                <q-td :props="props">
+                                    <q-btn
+                                      flat round dense
+                                      icon="edit"
+                                      @click="$parent.$emit('role_edit', props.row.id)"
+                                    />
+                                    <q-btn
+                                      flat round dense
+                                      color="red"
+                                      icon="delete"
+                                      @click="$parent.$emit('role_delete', props.row.id)"
+                                    />
+                                </q-td>
+                            ''')
 
-                                    with ui.row().classes('items-center justify-center gap-1'):
-                                        ui.button(
-                                            icon='edit',
-                                            on_click=lambda r=role: roles_page.show_edit_role_dialog(r)
-                                        ).props('flat round dense').tooltip('编辑')
-                                        ui.button(
-                                            icon='delete',
-                                            on_click=lambda r=role: roles_page.show_delete_role_confirm(r)
-                                        ).props('flat round dense color=red').tooltip('删除')
-                                except Exception as e:
-                                    print(f"[FRONTEND ERROR] role actions cell render failed: {e}")
+                            def _get_role_by_id(role_id: str):
+                                return next((r for r in roles_page.roles_data if r.get('id') == role_id), None)
 
-                            print(f"[FRONTEND] Table created successfully with actions slot")
+                            def _extract_first_arg(e):
+                                """兼容不同 NiceGUI 版本下自定义事件参数结构，尽量取出第一个参数。"""
+                                data = getattr(e, 'args', None)
+                                if not isinstance(data, (list, tuple, dict)):
+                                    return data
+                                if isinstance(data, (list, tuple)):
+                                    return data[0] if data else None
+                                inner = data.get('args') if isinstance(data, dict) else None
+                                if isinstance(inner, (list, tuple)) and inner:
+                                    return inner[0]
+                                return None
+
+                            def _on_role_edit(e):
+                                role_id = _extract_first_arg(e)
+                                print(f"[FRONTEND] role_edit event, role_id={role_id}, raw_args={getattr(e, 'args', None)}")
+                                if not role_id:
+                                    return
+                                role = _get_role_by_id(role_id)
+                                if role:
+                                    roles_page.show_edit_role_dialog(role)
+
+                            def _on_role_delete(e):
+                                role_id = _extract_first_arg(e)
+                                print(f"[FRONTEND] role_delete event, role_id={role_id}, raw_args={getattr(e, 'args', None)}")
+                                if not role_id:
+                                    return
+                                role = _get_role_by_id(role_id)
+                                if role:
+                                    roles_page.show_delete_role_confirm(role)
+
+                            roles_page.table.on('role_edit', _on_role_edit)
+                            roles_page.table.on('role_delete', _on_role_delete)
+
+                            print(f"[FRONTEND] Table created successfully with actions slot (NiceGUI 3.x)")
                         except Exception as e:
                             print(f"[FRONTEND ERROR] Table rendering failed: {e}")
                             import traceback

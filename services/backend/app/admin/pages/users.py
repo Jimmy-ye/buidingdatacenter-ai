@@ -307,36 +307,81 @@ def show_users_page():
                                 columns=columns,
                                 rows=rows,
                                 row_key='id',
-                                pagination=20
+                                pagination=20,
                             ).classes('w-full')
 
-                            @users_page.table.add_slot('body-cell-actions')
-                            def _(row):
-                                try:
-                                    print(f"[FRONTEND] actions slot called with row: {row}")
-                                    user_id = row.get('id')
-                                    user = next((u for u in users_page.users_data if u.get('id') == user_id), None)
-                                    if not user:
-                                        print(f"[FRONTEND WARN] actions slot: user not found for id={user_id}")
-                                        return
+                            # 在 NiceGUI 3.x 中使用模板 slot + 自定义事件来渲染操作列
+                            users_page.table.add_slot('body-cell-actions', r'''
+                                <q-td :props="props">
+                                    <q-btn
+                                      flat round dense
+                                      icon="edit"
+                                      @click="$parent.$emit('user_edit', props.row.id)"
+                                    />
+                                    <q-btn
+                                      flat round dense
+                                      icon="lock_reset"
+                                      @click="$parent.$emit('user_reset_password', props.row.id)"
+                                    />
+                                    <q-btn
+                                      flat round dense
+                                      color="red"
+                                      icon="delete"
+                                      @click="$parent.$emit('user_delete', props.row.id)"
+                                    />
+                                </q-td>
+                            ''')
 
-                                    with ui.row().classes('items-center justify-center gap-1'):
-                                        ui.button(
-                                            icon='edit',
-                                            on_click=lambda u=user: users_page.show_edit_user_dialog(u)
-                                        ).props('flat round dense').tooltip('编辑')
-                                        ui.button(
-                                            icon='lock_reset',
-                                            on_click=lambda u=user: users_page.show_reset_password_dialog(u)
-                                        ).props('flat round dense').tooltip('重置密码')
-                                        ui.button(
-                                            icon='delete',
-                                            on_click=lambda u=user: users_page.show_delete_user_confirm(u)
-                                        ).props('flat round dense color=red').tooltip('删除')
-                                except Exception as e:
-                                    print(f"[FRONTEND ERROR] actions cell render failed: {e}")
+                            def _get_user_by_id(user_id: str):
+                                return next((u for u in users_page.users_data if u.get('id') == user_id), None)
 
-                            print(f"[FRONTEND] Table created successfully with actions slot")
+                            def _extract_first_arg(e):
+                                """兼容不同 NiceGUI 版本下自定义事件参数结构，尽量取出第一个参数。"""
+                                data = getattr(e, 'args', None)
+                                # 直接是值
+                                if not isinstance(data, (list, tuple, dict)):
+                                    return data
+                                # 列表 / 元组
+                                if isinstance(data, (list, tuple)):
+                                    return data[0] if data else None
+                                # 可能是 {'args': [...]} 结构
+                                inner = data.get('args') if isinstance(data, dict) else None
+                                if isinstance(inner, (list, tuple)) and inner:
+                                    return inner[0]
+                                return None
+
+                            def _on_user_edit(e):
+                                user_id = _extract_first_arg(e)
+                                print(f"[FRONTEND] user_edit event, user_id={user_id}, raw_args={getattr(e, 'args', None)}")
+                                if not user_id:
+                                    return
+                                user = _get_user_by_id(user_id)
+                                if user:
+                                    users_page.show_edit_user_dialog(user)
+
+                            def _on_user_reset_password(e):
+                                user_id = _extract_first_arg(e)
+                                print(f"[FRONTEND] user_reset_password event, user_id={user_id}, raw_args={getattr(e, 'args', None)}")
+                                if not user_id:
+                                    return
+                                user = _get_user_by_id(user_id)
+                                if user:
+                                    users_page.show_reset_password_dialog(user)
+
+                            def _on_user_delete(e):
+                                user_id = _extract_first_arg(e)
+                                print(f"[FRONTEND] user_delete event, user_id={user_id}, raw_args={getattr(e, 'args', None)}")
+                                if not user_id:
+                                    return
+                                user = _get_user_by_id(user_id)
+                                if user:
+                                    users_page.show_delete_user_confirm(user)
+
+                            users_page.table.on('user_edit', _on_user_edit)
+                            users_page.table.on('user_reset_password', _on_user_reset_password)
+                            users_page.table.on('user_delete', _on_user_delete)
+
+                            print(f"[FRONTEND] Table created successfully with actions slot (NiceGUI 3.x)")
                         except Exception as e:
                             print(f"[FRONTEND ERROR] Table rendering failed: {e}")
                             import traceback
