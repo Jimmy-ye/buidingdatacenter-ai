@@ -107,7 +107,10 @@ class UsersPage:
                 label='角色',
                 with_input=True,
                 multiple=True,
-            ).props('outlined use-chips emit-value map-options option-label=label option-value=value')
+                # NiceGUI 3.x: 明确指定用于显示和取值的字段
+                option_label='label',
+                option_value='value',
+            ).props('outlined use-chips emit-value map-options')
 
             with ui.row():
                 ui.button('取消', on_click=dialog.close).props('flat')
