@@ -501,6 +501,10 @@ async def upload_image_with_note(
         default=None,
         description="Pre-reading value for meter images; only meaningful when content_role='meter'",
     ),
+    meter_location: Optional[str] = Query(
+        default=None,
+        description="Location description for meter images; only meaningful when content_role='meter'",
+    ),
     auto_route: bool = Query(False, description="If true, automatically route image after upload"),
     db: Session = Depends(get_db),
 ) -> AssetRead:
@@ -546,9 +550,15 @@ async def upload_image_with_note(
     db.flush()
 
     location_meta = None
-    # 仅在 content_role 为 meter 且提供了预读数时写入 location_meta，供 LLM worker 使用
-    if meter_pre_reading is not None and (content_role or "").lower() == "meter":
-        location_meta = {"meter_pre_reading": float(meter_pre_reading)}
+    # 仅在 content_role 为 meter 时写入与仪表相关的元数据，供 LLM worker 和前端使用
+    if (content_role or "").lower() == "meter":
+        meta: dict = {}
+        if meter_pre_reading is not None:
+            meta["meter_pre_reading"] = float(meter_pre_reading)
+        if meter_location:
+            meta["meter_location"] = meter_location
+        if meta:
+            location_meta = meta
 
     asset = Asset(
         project_id=project_id_uuid,

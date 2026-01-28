@@ -938,6 +938,11 @@ class AssetDialog:
             ).props("dense outlined")
 
             auto_route_checkbox = ui.checkbox("自动解析（OCR/LLM）", value=True)
+            # 仪表专用字段：预读数、位置说明（仅在角色为 meter 时显示）
+            meter_pre_reading_input = ui.input(label="仪表预读数（可选，仅仪表）").props("type=number").style("max-width: 200px;")
+            meter_location_input = ui.input(label="仪表位置（可选，例如楼层/机房/回路号）").style("max-width: 320px;")
+            meter_pre_reading_input.visible = False
+            meter_location_input.visible = False
             note_input = ui.input(label="备注").props("type=textarea")
             title_input = ui.input(label="标题（可选，默认使用文件名）")
 
@@ -947,6 +952,15 @@ class AssetDialog:
 
             # 在 Python 端缓存已上传的单个文件内容
             selected_file: Dict[str, Any] = {"name": None, "content": None, "type": None}
+
+            def _update_meter_fields_visibility() -> None:
+                """根据角色选择显示/隐藏仪表专用输入栏。"""
+                is_meter = (role_select.value == "meter")
+                meter_pre_reading_input.visible = is_meter
+                meter_location_input.visible = is_meter
+
+            # 当角色变化时更新可见性
+            role_select.on_value_change(lambda e: _update_meter_fields_visibility())
 
             async def on_file_upload(e: Any) -> None:
                 """当浏览器将文件上传到 Python 端时缓存文件内容"""
@@ -1047,6 +1061,19 @@ class AssetDialog:
                     params["zone_id"] = str(zone_id)
                 if role_select.value:
                     params["content_role"] = role_select.value
+                    # 如果是仪表图片，并填写了预读数 / 位置，则一并上传
+                    if role_select.value == "meter":
+                        pre_val_raw = (meter_pre_reading_input.value or "").strip()
+                        if pre_val_raw:
+                            try:
+                                pre_val = float(pre_val_raw)
+                                params["meter_pre_reading"] = pre_val
+                            except Exception:
+                                # 解析失败时忽略该字段，避免 422
+                                pass
+                        location_val = (meter_location_input.value or "").strip()
+                        if location_val:
+                            params["meter_location"] = location_val
                 if auto_route_checkbox.value:
                     params["auto_route"] = "true"
 
