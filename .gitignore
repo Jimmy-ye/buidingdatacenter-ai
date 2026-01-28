@@ -100,6 +100,13 @@ mobile/bdc_ai_app/.flutter-plugins
 mobile/bdc_ai_app/.flutter-plugins-dependencies
 mobile/bdc_ai_app/.packages
 
+# Flutter 自动生成的插件注册文件
+mobile/bdc_ai_app/linux/flutter/generated_plugin_registrant.cc
+mobile/bdc_ai_app/linux/flutter/generated_plugins.cmake
+mobile/bdc_ai_app/macos/Flutter/GeneratedPluginRegistrant.swift
+mobile/bdc_ai_app/windows/flutter/generated_plugin_registrant.cc
+mobile/bdc_ai_app/windows/flutter/generated_plugins.cmake
+
 # 临时文件和日志
 *.tmp
 *.bak
