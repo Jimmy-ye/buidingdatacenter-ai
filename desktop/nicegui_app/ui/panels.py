@@ -355,7 +355,11 @@ class AssetDetailHelper:
             ui_elements["detail_tags"].text = ""
             ui_elements["preview_image"].visible = False
             ui_elements["preview_image"].source = ""
-            ui_elements["preview_button"].disabled = True
+
+            preview_button = ui_elements.get("preview_button")
+            if preview_button is not None:
+                preview_button.disabled = True
+
             ui_elements["inference_status_label"].text = ""
 
             run_ocr_button = ui_elements.get("run_ocr_button")
@@ -378,8 +382,10 @@ class AssetDetailHelper:
         ui_elements["detail_body"].text = info["body"]
         ui_elements["detail_tags"].text = info["tags"]
 
-        # 更新预览按钮状态
-        ui_elements["preview_button"].disabled = not info["is_image"]
+        # 更新预览按钮状态（按钮可能为可选）
+        preview_button = ui_elements.get("preview_button")
+        if preview_button is not None:
+            preview_button.disabled = not info["is_image"]
 
         # 清空 OCR/LLM 结果区域
         ui_elements["ocr_objects_label"].text = ""
