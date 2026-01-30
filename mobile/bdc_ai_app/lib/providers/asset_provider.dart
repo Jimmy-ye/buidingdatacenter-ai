@@ -200,6 +200,9 @@ class AssetProvider extends ChangeNotifier {
     String? note,
     String? contentRole,
     bool autoRoute = false, // ⭐ 添加自动解析参数
+    double? meterPreReading,
+    String? meterLocation,
+    String? zoneLabel,
   }) async {
     try {
       debugPrint('上传图片: projectId=$projectId, '
@@ -214,6 +217,9 @@ class AssetProvider extends ChangeNotifier {
         note: note,
         contentRole: contentRole,
         autoRoute: autoRoute, // ⭐ 传递自动解析选项
+        meterPreReading: meterPreReading,
+        meterLocation: meterLocation,
+        zoneLabel: zoneLabel,
       );
 
       // 上传成功后，刷新列表

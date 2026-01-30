@@ -39,6 +39,19 @@ class ContentTypeSelection {
   });
 }
 
+/// 资产额外字段（根据内容角色区分）
+class _RoleExtraInput {
+  final double? meterPreReading;
+  final String? meterLocation;
+  final String? zoneLabel;
+
+  const _RoleExtraInput({
+    this.meterPreReading,
+    this.meterLocation,
+    this.zoneLabel,
+  });
+}
+
 class _AssetsPageState extends State<AssetsPage> {
   final AssetService _assetService = AssetService();
   @override
@@ -131,15 +144,21 @@ class _AssetsPageState extends State<AssetsPage> {
     final selection = await _showContentTypeDialog();
     if (selection == null) return;
 
-    // 5. 输入备注（可选）
+    // 5. 根据资产类型收集额外字段（区域 / 仪表预读数等）
+    final extras = await _showRoleExtraDialog(selection.type);
+
+    // 6. 输入备注（可选）
     final note = await _showNoteInputDialog();
 
-    // 6. 上传图片
+    // 7. 上传图片
     await _uploadImageWithProgress(
       image.path,
       note,
       selection.type,
       selection.autoRoute,
+      meterPreReading: extras?.meterPreReading,
+      meterLocation: extras?.meterLocation,
+      zoneLabel: extras?.zoneLabel,
     );
   }
 
@@ -250,6 +269,106 @@ class _AssetsPageState extends State<AssetsPage> {
     return result ?? '';
   }
 
+  /// 根据资产类型收集额外字段（区域 / 仪表预读数 / 仪表位置）
+  Future<_RoleExtraInput?> _showRoleExtraDialog(String contentType) async {
+    final isMeter = contentType == 'meter';
+    final isNameplate = contentType == 'nameplate';
+    final isSceneIssue = contentType == 'scene_issue';
+
+    // 其他类型暂不需要额外字段
+    if (!isMeter && !isNameplate && !isSceneIssue) {
+      return null;
+    }
+
+    final zoneController = TextEditingController();
+    final preReadingController = TextEditingController();
+    final locationController = TextEditingController();
+
+    _RoleExtraInput? result;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(
+            isMeter
+                ? '填写仪表信息'
+                : isNameplate
+                    ? '填写铭牌区域'
+                    : '填写现场问题区域',
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: zoneController,
+                  decoration: const InputDecoration(
+                    labelText: '所属区域（可选）',
+                    hintText: '如：A机房-一层-冷冻水',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (isMeter) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: preReadingController,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: '仪表预读数（可选）',
+                      hintText: '例如：12345.6',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: locationController,
+                    decoration: const InputDecoration(
+                      labelText: '仪表位置/回路（可选）',
+                      hintText: '如：A机房-冷冻水表#1',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('跳过'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                double? pre;
+                final preRaw = preReadingController.text.trim();
+                if (preRaw.isNotEmpty) {
+                  pre = double.tryParse(preRaw);
+                }
+
+                result = _RoleExtraInput(
+                  meterPreReading: isMeter ? pre : null,
+                  meterLocation:
+                      isMeter ? locationController.text.trim() : null,
+                  zoneLabel: zoneController.text.trim().isEmpty
+                      ? null
+                      : zoneController.text.trim(),
+                );
+                Navigator.of(context).pop();
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
+    );
+
+    return result;
+  }
+
   /// 显示资产类型选择对话框（含自动解析选项）⭐
   ///
   /// 返回：ContentTypeSelection 对象（包含类型和自动解析标志），取消返回 null
@@ -339,8 +458,11 @@ class _AssetsPageState extends State<AssetsPage> {
     String filePath,
     String note,
     String contentType,
-    bool autoRoute,
-  ) async {
+    bool autoRoute, {
+    double? meterPreReading,
+    String? meterLocation,
+    String? zoneLabel,
+  }) async {
     // 显示加载对话框
     showDialog(
       context: context,
@@ -379,6 +501,9 @@ class _AssetsPageState extends State<AssetsPage> {
         note: note.isEmpty ? null : note,
         contentRole: contentType,
         autoRoute: autoRoute, // ⭐ 添加自动解析选项
+        meterPreReading: meterPreReading,
+        meterLocation: meterLocation,
+        zoneLabel: zoneLabel,
       );
 
       // 关闭加载对话框

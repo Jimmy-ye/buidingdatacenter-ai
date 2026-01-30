@@ -92,6 +92,9 @@ class AssetService {
     String? note,
     String? contentRole,
     bool autoRoute = false, // ⭐ 添加自动解析参数
+    double? meterPreReading,
+    String? meterLocation,
+    String? zoneLabel,
   }) async {
     // 验证必填参数
     if (projectId.isEmpty) {
@@ -130,6 +133,19 @@ class AssetService {
       }
       if (contentRole != null && contentRole.isNotEmpty) {
         endpoint += '&content_role=$contentRole';
+      }
+      // 仪表专用参数：预读数 + 位置说明
+      if ((contentRole ?? '').toLowerCase() == 'meter') {
+        if (meterPreReading != null) {
+          endpoint += '&meter_pre_reading=${meterPreReading.toString()}';
+        }
+        if (meterLocation != null && meterLocation.isNotEmpty) {
+          endpoint += '&meter_location=${Uri.encodeComponent(meterLocation)}';
+        }
+      }
+      // 区域分区标签：所有类型都可以附带
+      if (zoneLabel != null && zoneLabel.isNotEmpty) {
+        endpoint += '&zone_label=${Uri.encodeComponent(zoneLabel)}';
       }
       endpoint += '&auto_route=${autoRoute ? "true" : "false"}'; // ⭐ 添加自动解析选项
 
