@@ -193,8 +193,38 @@ class StructureProvider extends ChangeNotifier {
 
   /// 刷新工程结构树
   Future<void> refreshStructureTree(String projectId) async {
-    debugPrint('刷新工程结构树');
-    await loadStructureTree(projectId);
+    debugPrint('刷新工程结构树（强制网络请求，失败时保留当前数据）');
+
+    // 保留当前内存中的结构树，作为失败时的回退数据
+    final previousBuildings = List<Building>.from(_buildings);
+
+    _setLoading(true);
+    _clearError();
+
+    try {
+      // 直接走网络请求，不依赖缓存是否过期
+      final fresh = await _service.getStructureTree(projectId);
+      _buildings = fresh;
+      debugPrint('刷新工程结构成功: ${_buildings.length} 个楼栋');
+
+      // 刷新成功后更新本地缓存
+      await _saveToCache(projectId, _buildings);
+      notifyListeners();
+    } catch (e) {
+      if (e is ApiException && (e.statusCode == 401 || e.statusCode == 403)) {
+        // 认证问题交由上层处理，这里不打断已有数据
+        debugPrint('刷新工程结构树请求认证失败: $e');
+        return;
+      }
+
+      // 网络等异常：保留之前的楼栋列表，不清空 UI，只打印日志
+      debugPrint('刷新工程结构树失败，保留当前数据: $e');
+      _buildings = previousBuildings;
+      // 不设置错误消息，避免打断用户
+      notifyListeners();
+    } finally {
+      _setLoading(false);
+    }
   }
 
   /// 切换楼栋展开/折叠状态

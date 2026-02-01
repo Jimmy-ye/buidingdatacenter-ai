@@ -219,44 +219,56 @@ def build_nameplate_prompt(note: Optional[str]) -> str:
     """构造发送给 GLM-4V 的 Prompt，用于通用建筑用能设备铭牌抽取，输出 nameplate_table_v1。"""
 
     base = """
-你是一个建筑用能设备“铭牌”解析助手。
+你是一名建筑设备铭牌识别助手。
 
-目标：读取图片中的铭牌文字，抽取与能耗相关的关键参数，并生成一个严格符合 nameplate_table_v1 结构的 JSON。
+任务：阅读图片中的铭牌（以及可能的备注文本），提取与能耗相关的关键参数，并生成一个用于表格展示的 JSON。
 
-一、先判断是否为“建筑用能设备铭牌”
-- 如果明显不是（如饮料瓶、食品标签、广告等），则：
-  - is_energy_equipment = false
-  - not_energy_reason 写明简单原因（如 "image_is_beverage_can_label"）
-  - 其他所有字段保持 JSON 结构但全部为 null、{} 或 []。
+JSON 结构必须严格为：
+{
+  "equipment_type": "chiller | boiler | pump | fan | ahu | fcu | cooling_tower | heat_pump | transformer | other | non_energy_equipment",
+  "fields": [
+    {
+      "key": "rated_power_kw",
+      "label": "额定功率(kW)",
+      "value": 45.0,
+      "unit": "kW",
+      "confidence": 0.9
+    }
+  ]
+}
 
-二、如果是建筑用能设备铭牌
-- 典型设备包括但不限于：冷水机组、热泵、冷却塔、冷/热水泵、风机盘管、空调机组、新风机组、锅炉、换热机组、空压机、电机/风机、变压器等。
-- 设备分类 equipment.category 必须从以下枚举中选择一个：
-  ["chiller","heat_pump","cooling_tower","boiler","pump","fan","ahu","fcu","heat_exchanger","air_compressor","cooling_unit","transformer","other"]。
+识别规则：
+- 先判断图片是否为“建筑用能设备铭牌”。
+  - 如果不是（如饮料瓶、食品标签、广告等），则：
+    - equipment_type = "non_energy_equipment"
+    - 在 fields 中添加一条说明原因的字段，例如：
+      { "key": "note", "label": "非设备铭牌原因", "value": "image_is_beverage_can_label", "unit": null, "confidence": 1.0 }
+    - 不要再添加其它参数字段。
+- 如果是建筑用能设备铭牌：
+  - 根据铭牌文字判断大类，equipment_type 从以下枚举中选择一个：
+    ["chiller","heat_pump","cooling_tower","boiler","pump","fan","ahu","fcu","transformer","other"]
+  - 在 fields 中为每个重要参数生成一条记录，例如：
+    - 额定功率(kW)：key 可以用 "rated_power_kw"
+    - 制冷量(kW)：key 可以用 "cooling_capacity_kw"
+    - 电压(V)：key 可以用 "voltage_v"
+    - 电流(A)：key 可以用 "current_a"
+    - 频率(Hz)：key 可以用 "frequency_hz"
+    - 风量(m3/h)：key 可以用 "air_flow_m3h"
+    - 水量(m3/h)：key 可以用 "water_flow_m3h"
+    - 能效比 COP/EER/IPLV：key 如 "cop", "eer", "iplv"
+    - 名称/型号/品牌：key 如 "model", "brand", "name_cn"
 
-三、JSON 顶层字段（nameplate_table_v1）
-- version: 固定填 "nameplate_table_v1"
-- is_energy_equipment: bool
-- not_energy_reason: string 或 null
-- equipment: {category, subtype, name_cn, name_en, brand, model, series, serial_number, factory_code, manufacture_date, standard_code}
-- energy_parameters: {rated_cooling_capacity_kw, rated_heating_capacity_kw, rated_power_input_kw, motor_power_kw, air_flow_m3h, water_flow_m3h, cop, eer, iplv, efficiency_percent, energy_efficiency_grade}
-- electrical_parameters: {voltage_v, phase, frequency_hz, current_a, power_factor}
-- working_conditions: {inlet_water_temp_c, outlet_water_temp_c, ambient_temp_c, condensing_temp_c, evaporating_temp_c, other_condition_note}
-- refrigerant_and_medium: {refrigerant_type, refrigerant_charge_kg, heat_transfer_medium}
-- mechanical_parameters: {pressure_level_mpa, speed_rpm, head_m}
-- location_info: {project_name, system_name, device_label}
-- raw_text: 把你识别到的完整铭牌文字（含数字和单位）原样放入
-- parse_confidence: 0.0~1.0 的数字
-- unknown_parameters: 数组，每项形如 {"label","value","unit","category"}
+字段含义：
+- key：机器可读的英文 key，建议用下划线风格（如 rated_power_kw、voltage_v）。
+- label：适合在表格中展示的名称，优先使用中文。
+- value：从铭牌上读到的数值或字符串，读不到时用 null。
+- unit：单位字符串（如 "kW", "V", "A", "℃", "m3/h"），看不到可以为 null。
+- confidence：0.0~1.0，表示你对该字段的把握程度；看不清或不确定时应降低到 0.5~0.7。
 
-四、字段填写原则
-- 所有数值字段（功率、流量、效率、温度、电压、电流等），只能在铭牌文字中出现且你能看清数值和单位时才填写，否则保持为 null。
-- 如果铭牌只给了 RT 等单位，没有 kW，不要自行换算，可把原始内容放入 unknown_parameters。
-- 严禁臆造任何数值或参数；无法确认就用 null，并把原始文字保留在 raw_text 或 unknown_parameters 中。
-- parse_confidence 反映你对整体解析的信心：清晰完整时可 0.8~0.95，模糊或缺失时应降低到 0.5~0.75。
-
-输出要求：
-- 只输出一个 JSON 对象，字段名必须与 nameplate_table_v1 结构一致，不要输出解释或 markdown。
+重要约束：
+- 只能根据铭牌上真实可见的文字填写，不要猜测或编造。
+- 如果无法确认某个数值，就不要填 value，保持为 null，并相应降低 confidence。
+- 最终响应必须是一个 JSON 对象，结构与上述示例完全一致，不要输出任何额外文字、解释或 markdown。
 """.strip()
 
     if note:
